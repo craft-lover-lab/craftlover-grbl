@@ -14,7 +14,7 @@ export const vi: Record<Key, string> = {
   'tb.open': 'Mở',
   'tb.openTip': 'Mở dự án (.lzr)',
   'tb.save': 'Lưu dự án',
-  'tb.saveTip': 'Lưu dự án (.lzr)',
+  'tb.saveTip': 'Lưu dự án (Ctrl+S) · Lưu thành… (Ctrl+Shift+S)',
   'tb.import': 'Nhập file',
   'tb.importTip': 'Nhập SVG, PDF, AI, EPS hoặc ảnh',
   'tb.undo': 'Hoàn tác (Ctrl+Z)',
@@ -238,6 +238,14 @@ export const vi: Record<Key, string> = {
   'check.travel': 'Trục {axis} sẽ chạy tới {lo} … {hi} mm theo tọa độ máy, vượt hành trình của máy {min} … {max} mm ($130/$131). Hãy dời thiết kế hoặc đặt lại gốc làm việc.',
   'job.unverifiedTravel': 'Lưu ý: máy chưa Homing trong phiên này nên không xác minh được giới hạn vật lý — phần mềm chỉ kiểm tra theo vùng bàn máy trên màn hình. Hãy chắc chắn gốc làm việc đã đặt đúng.',
   'job.saveAnyway': 'Vẫn lưu file?',
+
+  // SVG colors, project file, autosave
+  'layer.svgColor': 'SVG {color}',
+  'project.untitled': 'Chưa đặt tên',
+  'project.saved': 'Đã lưu {name}',
+  'project.discard': 'Bạn có thay đổi chưa lưu. Bỏ các thay đổi đó và mở dự án khác?',
+  'autosave.restore': 'Tìm thấy bản làm việc chưa lưu lúc {time} — phần mềm đã bị đóng khi chưa lưu hoặc bị tắt đột ngột.\n\nKhôi phục lại?',
+  'autosave.restored': 'Đã khôi phục bản làm việc chưa lưu lúc {time}',
 
   // Layers order, material library, test grid
   'tb.library': 'Vật liệu',

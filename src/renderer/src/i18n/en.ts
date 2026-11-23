@@ -13,7 +13,7 @@ export const en = {
   'tb.open': 'Open',
   'tb.openTip': 'Open project (.lzr)',
   'tb.save': 'Save project',
-  'tb.saveTip': 'Save project (.lzr)',
+  'tb.saveTip': 'Save project (Ctrl+S) · Save as… (Ctrl+Shift+S)',
   'tb.import': 'Import',
   'tb.importTip': 'Import SVG, PDF, AI, EPS or images',
   'tb.undo': 'Undo (Ctrl+Z)',
@@ -253,6 +253,14 @@ export const en = {
   'check.travel': 'Axis {axis} would move to {lo} … {hi} mm in machine coordinates, outside the machine travel {min} … {max} mm ($130/$131). Move the design or set the work origin again.',
   'job.unverifiedTravel': 'Note: the machine has not been homed in this session, so its physical limits cannot be verified — only the bed area on screen was checked. Make sure the work origin is correct.',
   'job.saveAnyway': 'Save the file anyway?',
+
+  // SVG colors, project file, autosave
+  'layer.svgColor': 'SVG {color}',
+  'project.untitled': 'Untitled',
+  'project.saved': 'Saved {name}',
+  'project.discard': 'You have unsaved changes. Discard them and open another project?',
+  'autosave.restore': 'Unsaved work from {time} was found — the app was closed without saving or stopped unexpectedly.\n\nRestore it?',
+  'autosave.restored': 'Restored unsaved work from {time}',
 
   // Layers order, material library, test grid
   'tb.library': 'Materials',

@@ -50,6 +50,11 @@ declare global {
       openFiles(): Promise<{ name: string; data: Uint8Array }[]>;
       saveText(name: string, text: string, kind?: 'gcode' | 'project'): Promise<boolean>;
       openProject(): Promise<{ name: string; text: string } | null>;
+      saveProject(text: string, saveAs: boolean, defaultName: string): Promise<{ name: string } | null>;
+      forgetProject(): Promise<void>;
+      autosaveWrite(text: string): Promise<void>;
+      autosaveRead(): Promise<{ text: string; time: number } | null>;
+      autosaveClear(): Promise<void>;
       epsToPdf(data: Uint8Array): Promise<Uint8Array>;
       listFonts(): Promise<{ name: string; file: string }[]>;
       readFont(file: string): Promise<Uint8Array>;

@@ -2,6 +2,7 @@ import type { Polyline } from '../core/types';
 import { parsePathData } from './svgPath';
 import { pathsBounds, isEmpty } from '../core/geometry';
 import { t } from '../i18n';
+import { paintOf } from './svgColor';
 
 const UNIT_MM: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: 25.4 / 96, '': 25.4 / 96 };
 
@@ -73,12 +74,30 @@ function elementMatrix(el: Element, root: Element): M {
   return m;
 }
 
+export interface SvgColorGroup {
+  /** Original color, "#rrggbb" */
+  color: string;
+  /** Stroked shapes → line (cut/score); fill-only shapes → fill engrave */
+  mode: 'line' | 'fill';
+  /** Paths relative to the group's own bottom-left corner (mm) */
+  paths: Polyline[];
+  /** Position of the group inside the whole drawing (mm, from its bottom-left) */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /**
- * Read an SVG and return its paths (mm, Y up, origin at the bottom-left of the bounding box).
+ * Read an SVG and split it by color: every distinct stroke color (or fill color for
+ * shapes without a stroke) becomes its own group, so it can go onto its own layer.
+ * Colors come from the computed style, so CSS classes, inherited group styles and
+ * currentColor all count. Sizes are in mm with the Y axis up.
  */
-export function importSvg(text: string): { paths: Polyline[]; w: number; h: number } {
+export function importSvg(text: string): { w: number; h: number; groups: SvgColorGroup[] } {
   const host = document.createElement('div');
-  host.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden';
+  // Off-screen rather than visibility:hidden — the elements' own visibility is read from their style
+  host.style.cssText = 'position:absolute;left:-99999px;top:0;width:0;height:0;overflow:hidden;pointer-events:none';
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
   const parsed = doc.querySelector('svg');
   if (!parsed || doc.querySelector('parsererror')) throw new Error(t('err.svgInvalid'));
@@ -103,30 +122,50 @@ export function importSvg(text: string): { paths: Polyline[]; w: number; h: numb
       if (hMM && !wMM) sx = sy;
     }
     const tolUnits = 0.05 / Math.min(sx, sy);
-    const paths: Polyline[] = [];
-    const walk = (el: Element, hidden: boolean) => {
+    // key "color|mode" → paths, in first-seen order
+    const byPaint = new Map<string, Polyline[]>();
+    const walk = (el: Element) => {
       const tag = el.tagName.toLowerCase();
       if (SKIP.has(tag)) return;
-      const disp = el.getAttribute('display') === 'none' || (el as HTMLElement).style?.display === 'none';
-      if (disp || hidden) return;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none') return; // hides the whole subtree
       const d = shapeToD(el);
-      if (d) {
+      const paint = d && cs.visibility !== 'hidden' ? paintOf({ stroke: cs.stroke, fill: cs.fill, strokeWidth: cs.strokeWidth, strokeOpacity: cs.strokeOpacity, fillOpacity: cs.fillOpacity, opacity: cs.opacity }) : null;
+      if (d && paint) {
         const m = elementMatrix(el, svg);
+        const key = `${paint.color}|${paint.mode}`;
+        if (!byPaint.has(key)) byPaint.set(key, []);
+        const list = byPaint.get(key)!;
         for (const pl of parsePathData(d, tolUnits))
-          paths.push(
+          list.push(
             pl.map((p) => ({
               x: (m[0] * p.x + m[2] * p.y + m[4] - vx) * sx,
               y: -(m[1] * p.x + m[3] * p.y + m[5] - vy) * sy, // flip the Y axis
             })),
           );
       }
-      for (const c of Array.from(el.children)) walk(c, false);
+      for (const c of Array.from(el.children)) walk(c);
     };
-    for (const c of Array.from(svg.children)) walk(c, false);
-    const b = pathsBounds(paths);
-    if (isEmpty(b)) throw new Error(t('err.svgEmpty'));
-    const norm = paths.map((pl) => pl.map((p) => ({ x: p.x - b.minX, y: p.y - b.minY })));
-    return { paths: norm, w: b.maxX - b.minX, h: b.maxY - b.minY };
+    for (const c of Array.from(svg.children)) walk(c);
+
+    const all = pathsBounds([...byPaint.values()].flat());
+    if (isEmpty(all)) throw new Error(t('err.svgEmpty'));
+    const groups: SvgColorGroup[] = [];
+    for (const [key, paths] of byPaint) {
+      if (!paths.length) continue;
+      const [color, mode] = key.split('|') as [string, 'line' | 'fill'];
+      const b = pathsBounds(paths);
+      groups.push({
+        color,
+        mode,
+        paths: paths.map((pl) => pl.map((p) => ({ x: p.x - b.minX, y: p.y - b.minY }))),
+        x: b.minX - all.minX,
+        y: b.minY - all.minY,
+        w: b.maxX - b.minX,
+        h: b.maxY - b.minY,
+      });
+    }
+    return { w: all.maxX - all.minX, h: all.maxY - all.minY, groups };
   } finally {
     host.remove();
   }

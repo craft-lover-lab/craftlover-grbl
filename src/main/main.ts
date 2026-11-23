@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { GrblConnection } from './grbl';
 import { listPorts, openSerial } from './serialTransport';
@@ -39,7 +39,8 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) win.loadURL(devUrl);
-  else win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  // LASER_CONFIRM=1 (snapshot tests only): answer every confirm() dialog with "yes"
+  else win.loadFile(path.join(__dirname, '../renderer/index.html'), process.env.LASER_SNAPSHOT && process.env.LASER_CONFIRM ? { query: { autoconfirm: '1' } } : undefined);
   win.on('closed', () => (win = null));
 
   // Automated test: LASER_SNAPSHOT=path.png → capture a screenshot after loading, then quit
@@ -128,11 +129,52 @@ ipcMain.handle('file:saveText', async (_e, defaultName: string, text: string, ki
   return true;
 });
 
+// ---------- Projects: the main process remembers the current file, so "Save" (Ctrl+S)
+// can only ever write to a file the user picked in a dialog ----------
+let projectPath: string | null = null;
+const atomicWrite = async (file: string, text: string) => {
+  const tmp = file + '.tmp';
+  await writeFile(tmp, text, 'utf8');
+  await rename(tmp, file);
+};
+
 ipcMain.handle('file:openProject', async () => {
   const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: dt().project, extensions: ['lzr'] }] });
   if (r.canceled || !r.filePaths[0]) return null;
-  return { name: path.basename(r.filePaths[0]), text: await readFile(r.filePaths[0], 'utf8') };
+  const text = await readFile(r.filePaths[0], 'utf8');
+  projectPath = r.filePaths[0];
+  return { name: path.basename(projectPath), text };
 });
+
+/** Save the project: to the current file, or via a dialog for "Save as" / a new project. */
+ipcMain.handle('project:save', async (_e, text: string, saveAs: boolean, defaultName: string) => {
+  let file = saveAs ? null : projectPath;
+  if (!file) {
+    const r = await dialog.showSaveDialog(win!, { defaultPath: projectPath ?? defaultName, filters: [{ name: dt().project, extensions: ['lzr'] }] });
+    if (r.canceled || !r.filePath) return null;
+    file = r.filePath;
+  }
+  await atomicWrite(file, text);
+  projectPath = file;
+  return { name: path.basename(file) };
+});
+
+ipcMain.handle('project:forget', () => {
+  projectPath = null;
+});
+
+// ---------- Autosave / crash recovery ----------
+const autosaveFile = () => path.join(app.getPath('userData'), 'autosave.lzr');
+ipcMain.handle('autosave:write', (_e, text: string) => atomicWrite(autosaveFile(), text));
+ipcMain.handle('autosave:read', async () => {
+  try {
+    const [text, st] = await Promise.all([readFile(autosaveFile(), 'utf8'), stat(autosaveFile())]);
+    return { text, time: st.mtimeMs };
+  } catch {
+    return null;
+  }
+});
+ipcMain.handle('autosave:clear', () => rm(autosaveFile(), { force: true }));
 
 // ---------- Material library: stored as JSON in the app's user-data folder ----------
 const libraryFile = () => path.join(app.getPath('userData'), 'materials.json');

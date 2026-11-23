@@ -261,8 +261,7 @@ export function App() {
           setSelectedId(id);
         };
         if (ext === 'svg') {
-          const r = importSvg(new TextDecoder().decode(f.data));
-          add({ name: f.name, kind: 'vector', paths: r.paths, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: 'cut' });
+          addSvg(f.name, importSvg(new TextDecoder().decode(f.data)));
         } else if (ext === 'pdf' || ext === 'ai' || ext === 'eps') {
           // EPS is converted to PDF by Ghostscript (vectors preserved), then read like a PDF
           const pdf = ext === 'eps' ? await window.laser.epsToPdf(f.data) : f.data;
@@ -289,6 +288,57 @@ export function App() {
       }
     }
     setBusy('');
+  }
+
+  /**
+   * One object per SVG color, each on the layer with that color. Missing layers are created
+   * with the original color (stroke → line mode, fill-only → fill mode), so a design that uses
+   * red for cuts and black for engraving lands on two layers ready to set up. One undo step.
+   */
+  function addSvg(fileName: string, svg: ReturnType<typeof importSvg>) {
+    const ids: string[] = [];
+    hist.commit((d) => {
+      const right = d.items.reduce((m, i) => Math.max(m, itemBounds(i).maxX), 0);
+      const x0 = d.items.length && right + 5 + svg.w <= machine.bedW ? right + 5 : 10;
+      const newLayers: Layer[] = [];
+      const layerFor = (color: string, mode: 'line' | 'fill') => {
+        const all = [...d.layers, ...newLayers];
+        const hit = all.find((l) => l.color.toLowerCase() === color && l.mode !== 'image');
+        if (hit) return hit.id;
+        const l: Layer = {
+          ...baseLayer,
+          id: uid(),
+          name: t('layer.svgColor', { color }),
+          color,
+          mode,
+          // Low, safe defaults: the user sets real values (or loads a preset) before running
+          speed: mode === 'fill' ? 6000 : 1000,
+          power: 20,
+        };
+        newLayers.push(l);
+        return l.id;
+      };
+      const newItems: Item[] = svg.groups.map((gr) => {
+        const id = uid();
+        ids.push(id);
+        return {
+          id,
+          name: svg.groups.length > 1 ? `${fileName} · ${gr.color}` : fileName,
+          kind: 'vector' as const,
+          paths: gr.paths,
+          srcW: gr.w,
+          srcH: gr.h,
+          w: gr.w,
+          h: gr.h,
+          x: x0 + gr.x,
+          y: 10 + gr.y,
+          layerId: layerFor(gr.color, gr.mode),
+          copies: COPIES_1,
+        };
+      });
+      return { items: [...d.items, ...newItems], layers: [...d.layers, ...newLayers] };
+    });
+    setSelectedIds(ids);
   }
 
   // ---------- Editing ----------
@@ -386,26 +436,99 @@ export function App() {
   }
 
   // ---------- Project files ----------
-  async function saveProject() {
-    await window.laser.saveText(t('project.defaultName'), serializeProject(items, layers), 'project');
+  // ---------- Project file, unsaved changes, autosave ----------
+  const [projectName, setProjectName] = useState<string | null>(null);
+  /** The document as last saved / opened; anything else counts as unsaved changes */
+  const [savedDoc, setSavedDoc] = useState<Doc | null>(null);
+  const dirty = hist.state !== savedDoc && (items.length > 0 || (savedDoc?.items.length ?? 0) > 0);
+
+  useEffect(() => {
+    document.title = `${dirty ? '• ' : ''}${projectName ?? t('project.untitled')} — ${t('app.name')}`;
+  }, [dirty, projectName, lang]);
+
+  async function saveProject(saveAs = false) {
+    try {
+      const doc = hist.state;
+      const r = await window.laser.saveProject(serializeProject(doc.items, doc.layers), saveAs, t('project.defaultName'));
+      if (!r) return;
+      setProjectName(r.name);
+      setSavedDoc(doc);
+      window.laser.autosaveClear();
+      g.push(t('project.saved', { name: r.name }));
+    } catch (e) {
+      alert(errorText(e));
+    }
   }
 
   async function openProject() {
+    if (dirty && !confirm(t('project.discard'))) return;
     const f = await window.laser.openProject();
     if (!f) return;
     try {
       const p = parseProject(f.text);
-      hist.reset({ items: p.items, layers: p.layers });
+      const doc = { items: p.items, layers: p.layers };
+      hist.reset(doc);
+      setSavedDoc(doc);
+      setProjectName(f.name);
       setSelectedId(null);
+      window.laser.autosaveClear();
       g.push(t('project.opened', { name: f.name }));
     } catch (e) {
       alert(t('project.openFailed', { msg: errorText(e) }));
     }
   }
 
+  // Autosave 3 s after the last change while there are unsaved changes. The file survives a
+  // crash or an unexpected close and is offered back on the next start.
+  useEffect(() => {
+    if (!window.laser?.autosaveWrite) return;
+    if (!dirty) return;
+    const doc = hist.state;
+    const id = setTimeout(() => {
+      window.laser.autosaveWrite(JSON.stringify({ project: projectName, saved: Date.now(), data: serializeProject(doc.items, doc.layers) })).catch(() => {});
+    }, 3000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hist.state, dirty]);
+
+  // On start: offer to restore work that was never saved
+  useEffect(() => {
+    window.laser
+      ?.autosaveRead?.()
+      .then((a) => {
+        if (!a) return;
+        let restored = false;
+        try {
+          const wrap = JSON.parse(a.text) as { project: string | null; data: string };
+          const p = parseProject(wrap.data);
+          const time = new Date(a.time).toLocaleString(lang);
+          if (p.items.length && confirm(t('autosave.restore', { time }))) {
+            hist.reset({ items: p.items, layers: p.layers });
+            // Restored work is unsaved by definition; keep the file name for reference only
+            setSavedDoc(null);
+            window.laser.forgetProject();
+            setProjectName(null);
+            g.push(t('autosave.restored', { time }));
+            restored = true;
+          }
+        } catch {
+          /* unreadable autosave: drop it */
+        }
+        if (!restored) window.laser.autosaveClear();
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---------- Keyboard shortcuts (design-app style) ----------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ctrl+S / Ctrl+Shift+S work everywhere, even while typing in a field
+      if (e.ctrlKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveProject(e.shiftKey);
+        return;
+      }
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const k = e.key.toLowerCase();
@@ -448,6 +571,8 @@ export function App() {
   // ---------- Test hooks used by the automated snapshot mode (LASER_ACTIONS) ----------
   (window as any).__laserAction = async (name: string, ...args: any[]) => {
     if (name === 'lang') setLang(args[0]);
+    if (name === 'wait') await new Promise((r) => setTimeout(r, args[0]));
+    if (name === 'title') return document.title;
     if (name === 'select') setSelectedId(items[args[0]]?.id ?? null);
     if (name === 'preview') setShowPreview(!!args[0]);
     if (name === 'rotate') applyTransform(args[0], args[1], args[2]);
@@ -586,7 +711,7 @@ export function App() {
         <button onClick={openProject} title={t('tb.openTip')}>
           📁 <span className="lbl">{t('tb.open')}</span>
         </button>
-        <button onClick={saveProject} disabled={!items.length} title={t('tb.saveTip')}>
+        <button onClick={() => saveProject(false)} disabled={!items.length} title={t('tb.saveTip')}>
           💾 <span className="lbl">{t('tb.save')}</span>
         </button>
         <button onClick={() => importFiles()} title={t('tb.importTip')}>
