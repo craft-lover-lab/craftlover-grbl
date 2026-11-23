@@ -2,6 +2,11 @@
   "name": "laser-tool",
   "version": "0.1.0",
   "description": "Phần mềm điều khiển máy khắc/cắt laser GRBL (Sculpfun S30)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cuongvd2702/craftlover-grbl.git"
+  },
   "main": "dist/main/main.js",
   "private": true,
   "scripts": {

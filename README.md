@@ -1,4 +1,4 @@
-# Laser Tool
+# CraftLover GRBL (Laser Tool)
 
 Phần mềm điều khiển máy khắc/cắt laser chạy firmware GRBL 1.1, viết bằng Electron, TypeScript và React.
 Mặc định được cấu hình cho Sculpfun S30 10W (bàn máy 410×400 mm, `$30=1000`, 115200 baud).
@@ -88,3 +88,16 @@ Chạy lệnh dưới đây, ứng dụng sẽ nạp các file mẫu, chụp mà
 ```bash
 LASER_SNAPSHOT=shot.png LASER_GCODE_OUT=job.gcode LASER_DEMO="samples/hop-qua.svg;samples/gradient.png" \n  LASER_ACTIONS='[["select",0],["rotate",90],["list"]]' npx electron .
 ```
+
+## Giấy phép
+
+Phát hành theo giấy phép [MIT](LICENSE). Bạn được tự do dùng, sửa đổi và phân phối lại.
+
+Các thư viện bên thứ ba giữ nguyên giấy phép riêng của chúng:
+
+| Thư viện | Giấy phép |
+|---|---|
+| Electron, React, serialport, opentype.js | MIT |
+| pdf.js | Apache-2.0 |
+
+Ghostscript (AGPL) không được đóng gói kèm. Phần mềm chỉ gọi Ghostscript nếu người dùng đã tự cài trên máy.
