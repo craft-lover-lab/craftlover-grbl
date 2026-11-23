@@ -27,7 +27,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // Chế độ chụp tự động: vẫn vẽ lại khi cửa sổ bị che
+      // Snapshot mode: keep painting even when the window is covered
       backgroundThrottling: !process.env.LASER_SNAPSHOT,
     },
   });
@@ -37,7 +37,7 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, '../renderer/index.html'));
   win.on('closed', () => (win = null));
 
-  // Kiểm thử tự động: LASER_SNAPSHOT=đường_dẫn.png → chụp màn hình sau khi tải xong rồi thoát
+  // Automated test: LASER_SNAPSHOT=path.png → capture a screenshot after loading, then quit
   const snap = process.env.LASER_SNAPSHOT;
   if (snap) {
     win.webContents.on('console-message', (e: any) => console.log('[renderer]', e.message ?? e));
@@ -49,7 +49,7 @@ function createWindow() {
           await win!.webContents.executeJavaScript(`window.__laserImport(${JSON.stringify(files)})`);
           if (process.env.LASER_COPIES) await win!.webContents.executeJavaScript(`window.__laserSetCopies(${process.env.LASER_COPIES})`);
           await new Promise((r) => setTimeout(r, 1500));
-          // LASER_ACTIONS='[["select",0],["rotate",90]]' → chạy lần lượt các thao tác kiểm thử
+          // LASER_ACTIONS='[["select",0],["rotate",90]]' → run the scripted test actions in order
           for (const a of JSON.parse(process.env.LASER_ACTIONS ?? '[]') as unknown[][]) {
             const res = await win!.webContents.executeJavaScript(`window.__laserAction(...${JSON.stringify(a)})`);
             console.log('[action]', JSON.stringify(a), '→', typeof res === 'string' ? '\n' + res : JSON.stringify(res));

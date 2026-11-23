@@ -1,13 +1,13 @@
 import type { Polyline, Pt, ShapeSpec } from './types';
 
-/** Số đoạn thẳng xấp xỉ cho một cung tròn bán kính r (mm), sai số ~0.02 mm. */
+/** Number of segments to approximate an arc of radius r (mm) within ~0.02 mm. */
 function arcSegs(r: number, sweep: number) {
   if (r <= 0) return 1;
   const step = 2 * Math.acos(Math.max(-1, 1 - 0.02 / r));
   return Math.max(4, Math.min(720, Math.ceil(sweep / (step || 0.1))));
 }
 
-/** Hình chữ nhật w×h (góc dưới-trái tại 0,0), bo góc bán kính r. */
+/** A w×h rectangle (bottom-left at 0,0) with corner radius r. */
 export function rectPath(w: number, h: number, r = 0): Polyline {
   r = Math.max(0, Math.min(r, w / 2, h / 2));
   if (r < 0.01)
@@ -46,7 +46,7 @@ export function ellipsePath(w: number, h: number): Polyline {
   return pts;
 }
 
-/** Đa giác đều nội tiếp elip w×h, một đỉnh hướng lên trên. */
+/** Regular polygon fitted to a w×h box, one vertex pointing up. */
 export function polygonPath(sides: number, w: number, h: number): Polyline {
   const n = Math.max(3, Math.min(64, Math.round(sides)));
   const raw: Pt[] = [];
@@ -54,7 +54,7 @@ export function polygonPath(sides: number, w: number, h: number): Polyline {
     const a = Math.PI / 2 + (k / n) * Math.PI * 2;
     raw.push({ x: Math.cos(a), y: Math.sin(a) });
   }
-  // Co giãn khung bao của đa giác cho vừa đúng w×h
+  // Scale the polygon's bounding box to exactly w×h
   const minX = Math.min(...raw.map((p) => p.x));
   const maxX = Math.max(...raw.map((p) => p.x));
   const minY = Math.min(...raw.map((p) => p.y));
@@ -64,7 +64,7 @@ export function polygonPath(sides: number, w: number, h: number): Polyline {
   return pts;
 }
 
-/** Tạo lại đường của hình theo kích thước hiện tại (dùng khi đổi bo góc / số cạnh). */
+/** Regenerate a shape's paths at the current size (used when the radius / side count changes). */
 export function shapePaths(s: ShapeSpec, w: number, h: number): Polyline[] | null {
   switch (s.type) {
     case 'rect':
@@ -77,7 +77,7 @@ export function shapePaths(s: ShapeSpec, w: number, h: number): Polyline[] | nul
   return null;
 }
 
-/** Khung bao của đa giác đều bán kính R (đỉnh hướng lên), và vị trí tâm trong khung đó. */
+/** Bounding box of a regular polygon with radius R (vertex up), and the center's position inside it. */
 export function regularPolygonBox(sides: number, R: number) {
   const n = Math.max(3, Math.min(64, Math.round(sides)));
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;

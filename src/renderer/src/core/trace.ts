@@ -1,21 +1,21 @@
 import type { Bitmap, Polyline, Pt } from './types';
 
-/** Giới hạn độ phân giải khi dò viền để không bị chậm với ảnh lớn. */
+/** Resolution cap for tracing so large images stay fast. */
 const MAX_SIDE = 1500;
 
 export interface TraceOptions {
-  /** Điểm có độ xám nhỏ hơn ngưỡng được coi là đen (0..255) */
+  /** Pixels darker than this are treated as black (0..255) */
   threshold: number;
-  /** Bỏ các đốm nhỏ hơn diện tích này (mm²) */
+  /** Drop specks smaller than this area (mm²) */
   minArea: number;
-  /** Độ lệch tối đa khi làm mượt đường (tính theo điểm ảnh) */
+  /** Maximum deviation when simplifying paths (in pixels) */
   smooth: number;
 }
 
 /**
- * Dò viền ảnh đen trắng thành các đường kín (đơn vị mm, trục Y hướng lên).
- * Cách làm: lấy mọi cạnh điểm ảnh nằm giữa vùng đen và vùng trắng, nối thành vòng kín,
- * rồi rút gọn bằng thuật toán Ramer–Douglas–Peucker.
+ * Trace a black-and-white image into closed paths (mm, Y axis up).
+ * Method: collect every pixel edge between black and white, chain them into loops,
+ * then simplify with the Ramer–Douglas–Peucker algorithm.
  */
 export function traceBitmap(bmp: Bitmap, wMM: number, hMM: number, opt: TraceOptions): Polyline[] {
   const k = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
@@ -30,7 +30,7 @@ export function traceBitmap(bmp: Bitmap, wMM: number, hMM: number, opt: TraceOpt
     }
   const B = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && black[y * W + x] === 1;
 
-  // Cạnh có hướng: đi theo cạnh, vùng đen luôn nằm cùng một phía
+  // Directed edges: walking along an edge, black is always on the same side
   const V = W + 1;
   const next = new Map<number, number[]>();
   const add = (x0: number, y0: number, x1: number, y1: number) => {
@@ -98,7 +98,7 @@ function dropCollinear(pts: Pt[]): Pt[] {
   return out;
 }
 
-/** Ramer–Douglas–Peucker; với vòng kín, tách tại điểm xa điểm đầu nhất để giữ hình dạng. */
+/** Ramer–Douglas–Peucker; closed loops are split at the point farthest from the start to keep their shape. */
 function rdp(pts: Pt[], eps: number): Pt[] {
   if (pts.length < 4 || eps <= 0) return pts;
   let far = 0;

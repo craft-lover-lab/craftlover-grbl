@@ -7,13 +7,13 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
-/** Tìm Ghostscript (gswin64c.exe) trong Program Files hoặc PATH. */
+/** Locate Ghostscript (gswin64c.exe) in Program Files or on the PATH. */
 export function findGhostscript(): string | null {
   for (const root of [process.env['ProgramFiles'], process.env['ProgramFiles(x86)']]) {
     if (!root) continue;
     const gsDir = path.join(root, 'gs');
     if (!existsSync(gsDir)) continue;
-    // Chọn bản mới nhất (tên thư mục dạng gs10.04.0)
+    // Pick the newest version (folders are named like gs10.04.0)
     const versions = readdirSync(gsDir).sort().reverse();
     for (const v of versions)
       for (const exe of ['gswin64c.exe', 'gswin32c.exe']) {
@@ -29,7 +29,7 @@ export function findGhostscript(): string | null {
   return null;
 }
 
-/** Chuyển EPS → PDF bằng Ghostscript (giữ nguyên vector, cắt sát khung bao). */
+/** Convert EPS → PDF with Ghostscript (vectors preserved, cropped to the bounding box). */
 export async function epsToPdf(data: Uint8Array): Promise<Uint8Array> {
   const gs = findGhostscript();
   if (!gs)
@@ -40,7 +40,7 @@ export async function epsToPdf(data: Uint8Array): Promise<Uint8Array> {
     const src = path.join(dir, 'in.eps');
     const dst = path.join(dir, 'out.pdf');
     await writeFile(src, data);
-    // -dSAFER: chặn file EPS truy cập hệ thống; -dNOCACHE giữ chữ dạng đường cong
+    // -dSAFER: stop the EPS from touching the system; -dNOCACHE keeps text as outlines
     await run(gs, ['-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET', '-dEPSCrop', '-dNOCACHE', '-sDEVICE=pdfwrite', `-sOutputFile=${dst}`, src], {
       timeout: 60000,
       windowsHide: true,
@@ -56,7 +56,7 @@ export interface FontEntry {
   file: string;
 }
 
-/** Danh sách font đã cài trên Windows (đọc từ registry của máy và của người dùng). */
+/** Fonts installed on Windows (read from the machine and per-user registry keys). */
 export async function listFonts(): Promise<FontEntry[]> {
   const sysDir = path.join(process.env.WINDIR ?? 'C:\\Windows', 'Fonts');
   const keys = [
@@ -71,20 +71,20 @@ export async function listFonts(): Promise<FontEntry[]> {
         const m = line.match(/^\s+(.+?)\s+REG_SZ\s+(.+)$/);
         if (!m) continue;
         const file = path.isAbsolute(m[2]) ? m[2] : path.join(sysDir, m[2]);
-        // Bỏ các font dạng collection/bitmap mà opentype.js không đọc được
+        // Skip collection/bitmap fonts that opentype.js cannot read
         if (!/\.(ttf|otf)$/i.test(file)) continue;
         const name = m[1].replace(/\s*\((TrueType|OpenType)\)$/i, '');
         out.set(name, { name, file });
       }
     } catch {
-      /* khóa không tồn tại */
+      /* key does not exist */
     }
   }
   return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function readFont(file: string, allowed: FontEntry[]): Promise<Uint8Array> {
-  // Chỉ cho đọc file nằm trong danh sách font đã liệt kê
+  // Only allow reading files that are in the listed fonts
   const norm = (f: string) => path.resolve(f).toLowerCase();
   if (!allowed.some((f) => norm(f.file) === norm(file))) throw new Error('FONT_INVALID');
   return new Uint8Array(await readFile(file));

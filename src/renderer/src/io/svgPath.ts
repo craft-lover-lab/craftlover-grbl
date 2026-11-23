@@ -1,6 +1,6 @@
 import type { Polyline, Pt } from '../core/types';
 
-/** Phân tích chuỗi "d" của SVG path thành các đường gấp khúc (đơn vị người dùng SVG). */
+/** Parse an SVG path "d" string into polylines (SVG user units). */
 export function parsePathData(d: string, tol = 0.1): Polyline[] {
   const tokens = d.match(/[a-df-z]|[-+]?(?:\d*\.\d+|\d+\.?)(?:e[-+]?\d+)?/gi) ?? [];
   const out: Polyline[] = [];
@@ -15,7 +15,7 @@ export function parsePathData(d: string, tol = 0.1): Polyline[] {
   const isCmd = (t: string) => /^[a-z]$/i.test(t);
   const num = () => parseFloat(tokens[i++]);
   const flag = () => {
-    // Cờ của lệnh A có thể viết dính liền: "a1 1 0 0110 10"
+    // Arc flags may be written without separators: "a1 1 0 0110 10"
     const t = tokens[i];
     if (t.length > 1 && (t[0] === '0' || t[0] === '1') && !t.includes('.')) {
       tokens[i] = t.slice(1);
@@ -51,7 +51,7 @@ export function parsePathData(d: string, tol = 0.1): Polyline[] {
         p = { x: ox + num(), y: oy + num() };
         start = p;
         cur = [p];
-        cmd = rel ? 'l' : 'L'; // các cặp số tiếp theo là lệnh L
+        cmd = rel ? 'l' : 'L'; // following coordinate pairs are implicit L commands
         break;
       }
       case 'L':
@@ -152,7 +152,7 @@ export function quad(p0: Pt, p1: Pt, p2: Pt, tol: number): Pt[] {
   return pts;
 }
 
-/** Cung elip SVG (chuyển từ dạng điểm đầu/cuối sang dạng tâm, theo phụ lục F.6 của đặc tả SVG). */
+/** SVG elliptical arc (endpoint → center parameterization, per SVG spec appendix F.6). */
 function arc(p0: Pt, rx: number, ry: number, rotDeg: number, large: boolean, sweep: boolean, p1: Pt, tol: number): Pt[] {
   if (rx === 0 || ry === 0) return [p1];
   rx = Math.abs(rx);

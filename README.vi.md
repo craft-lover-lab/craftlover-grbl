@@ -321,7 +321,7 @@ src/
 ```bash
 LASER_PROFILE=./tmp-profile \
 LASER_SNAPSHOT=shot.png \
-LASER_DEMO="samples/hop-qua.svg;samples/gradient.png" \
+LASER_DEMO="samples/gift-box.svg;samples/gradient.png" \
 LASER_ACTIONS='[["lang","vi"],["tool","rect"],["mouse",[["mousedown",50,50],["mouseup",100,80]]],["list"]]' \
 LASER_GCODE_OUT=job.gcode \
 npx electron .

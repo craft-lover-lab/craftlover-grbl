@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
 
 /**
- * Trạng thái có hoàn tác / làm lại.
- * - set(): cập nhật "trực tiếp" (không ghi lịch sử) — dùng khi đang kéo chuột
- * - checkpoint(): ghi trạng thái hiện tại vào lịch sử trước khi thay đổi
- * - commit(): checkpoint + set, dùng cho các thao tác một bước
+ * State with undo / redo.
+ * - set(): live update without recording history — used while dragging
+ * - checkpoint(): record the current state before a change
+ * - commit(): checkpoint + set, for single-step operations
  */
 export function useHistory<T>(initial: T, limit = 200) {
   const [state, setState] = useState(initial);
@@ -53,7 +53,7 @@ export function useHistory<T>(initial: T, limit = 200) {
     setState(n);
   }, []);
 
-  /** Thay toàn bộ (mở dự án mới) và xóa lịch sử. */
+  /** Replace everything (e.g. opening a project) and clear the history. */
   const reset = useCallback((v: T) => {
     past.current = [];
     future.current = [];

@@ -11,7 +11,7 @@ function toB64(u: Uint8Array) {
 }
 const fromB64 = (b: string) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
 
-/** Lưu dự án (.lzr) dạng JSON: đối tượng, lớp gia công; ảnh lưu kèm dưới dạng base64. */
+/** Save a project (.lzr) as JSON: objects and layers; images are embedded as base64. */
 export function serializeProject(items: Item[], layers: Layer[]): string {
   return JSON.stringify({
     app: 'laser-tool',

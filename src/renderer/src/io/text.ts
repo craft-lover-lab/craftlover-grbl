@@ -19,8 +19,8 @@ async function loadFont(file: string) {
 export type TextAlign = 'left' | 'center' | 'right';
 
 /**
- * Chuyển chữ thành đường vector theo font đã cài trên máy.
- * size = cỡ chữ (mm, chiều cao em), lineHeight tính theo bội số của size.
+ * Convert text to vector paths using an installed font.
+ * size = font size (mm, em height); lineHeight is a multiple of size.
  */
 export async function textToPaths(text: string, fontFile: string, size: number, align: TextAlign = 'left', lineHeight = 1.2) {
   const font = await loadFont(fontFile);
@@ -38,7 +38,7 @@ export async function textToPaths(text: string, fontFile: string, size: number, 
       if (cur.length > 1) out.push(cur);
       cur = [];
     };
-    // Font dùng trục Y hướng xuống → lật lại cho trục máy
+    // Fonts use Y down → flip to machine coordinates
     const P = (x: number, y: number): Pt => ({ x, y: -y });
     for (const c of path.commands as any[]) {
       switch (c.type) {

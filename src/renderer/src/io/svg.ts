@@ -74,7 +74,7 @@ function elementMatrix(el: Element, root: Element): M {
 }
 
 /**
- * Đọc SVG và trả về các đường (mm, trục Y hướng lên, gốc tại góc dưới-trái khung bao).
+ * Read an SVG and return its paths (mm, Y up, origin at the bottom-left of the bounding box).
  */
 export function importSvg(text: string): { paths: Polyline[]; w: number; h: number } {
   const host = document.createElement('div');
@@ -82,7 +82,7 @@ export function importSvg(text: string): { paths: Polyline[]; w: number; h: numb
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
   const parsed = doc.querySelector('svg');
   if (!parsed || doc.querySelector('parsererror')) throw new Error(t('err.svgInvalid'));
-  // Loại bỏ mọi nội dung có thể thực thi trước khi gắn vào trang
+  // Strip anything executable before attaching it to the page
   parsed.querySelectorAll('script, foreignObject, image, iframe').forEach((e) => e.remove());
   [parsed, ...Array.from(parsed.querySelectorAll('*'))].forEach((e) => {
     for (const a of Array.from(e.attributes)) if (a.name.toLowerCase().startsWith('on')) e.removeAttribute(a.name);
@@ -116,7 +116,7 @@ export function importSvg(text: string): { paths: Polyline[]; w: number; h: numb
           paths.push(
             pl.map((p) => ({
               x: (m[0] * p.x + m[2] * p.y + m[4] - vx) * sx,
-              y: -(m[1] * p.x + m[3] * p.y + m[5] - vy) * sy, // lật trục Y
+              y: -(m[1] * p.x + m[3] * p.y + m[5] - vy) * sy, // flip the Y axis
             })),
           );
       }

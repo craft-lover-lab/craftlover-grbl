@@ -2,7 +2,7 @@ import type { Anchor, Bounds, Item, Pt } from '../core/types';
 import { anchorPoint, emptyBounds, placedPaths, union, uid } from '../core/geometry';
 import { transformItem } from '../core/transform';
 
-/** Khung bao của các đối tượng được chọn (không tính bản sao lưới). */
+/** Bounding box of the selected objects (grid copies excluded). */
 export function selBounds(items: Item[]): Bounds {
   return items.reduce((b, it) => union(b, { minX: it.x, minY: it.y, maxX: it.x + it.w, maxY: it.y + it.h }), emptyBounds());
 }
@@ -11,7 +11,7 @@ export function moveItems(items: Item[], ids: Set<string>, dx: number, dy: numbe
   return items.map((i) => (ids.has(i.id) ? { ...i, x: i.x + dx, y: i.y + dy } : i));
 }
 
-/** Co giãn các đối tượng quanh điểm cố định `fix` với hệ số sx, sy. */
+/** Scale objects around the fixed point `fix` by sx, sy. */
 export function scaleItems(base: Item[], ids: Set<string>, fix: Pt, sx: number, sy: number): Item[] {
   return base.map((i) =>
     ids.has(i.id)
@@ -26,7 +26,7 @@ export function scaleItems(base: Item[], ids: Set<string>, fix: Pt, sx: number, 
   );
 }
 
-/** Xoay nhóm đối tượng quanh tâm `c` (độ, ngược chiều kim đồng hồ). */
+/** Rotate a group of objects around center `c` (degrees, counter-clockwise). */
 export function rotateItems(items: Item[], ids: Set<string>, angle: number, c: Pt): Item[] {
   const t = (angle * Math.PI) / 180;
   return items.map((i) => {
@@ -41,7 +41,7 @@ export function rotateItems(items: Item[], ids: Set<string>, angle: number, c: P
   });
 }
 
-/** Lật nhóm qua trục dọc/ngang đi qua tâm nhóm. */
+/** Flip a group across the vertical/horizontal axis through its center. */
 export function flipItems(items: Item[], ids: Set<string>, fx: boolean, fy: boolean): Item[] {
   const b = selBounds(items.filter((i) => ids.has(i.id)));
   return items.map((i) => {
@@ -75,7 +75,7 @@ export function alignItems(items: Item[], ids: Set<string>, mode: AlignMode, tar
   });
 }
 
-/** Chia đều khoảng cách giữa các đối tượng theo trục X hoặc Y. */
+/** Space objects evenly along X or Y. */
 export function distributeItems(items: Item[], ids: Set<string>, axis: 'x' | 'y'): Item[] {
   const sel = items.filter((i) => ids.has(i.id));
   if (sel.length < 3) return items;
@@ -99,10 +99,10 @@ export function cloneItems(src: Item[], dx: number, dy: number): Item[] {
   return src.map((i) => ({ ...i, id: uid(), x: i.x + dx, y: i.y + dy }));
 }
 
-/** Điểm tham chiếu của khung chọn theo 9 điểm neo. */
+/** Reference point of the selection box for one of the 9 anchors. */
 export const refPoint = (b: Bounds, a: Anchor) => anchorPoint(b, a);
 
-/** Khoảng cách từ điểm tới đoạn thẳng. */
+/** Distance from a point to a line segment. */
 function segDist(p: Pt, a: Pt, b: Pt) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -123,27 +123,27 @@ function insideEvenOdd(p: Pt, paths: Pt[][]) {
 }
 
 /**
- * Kiểm tra con trỏ có trúng đối tượng không: ảnh → trong khung;
- * vector → gần nét (tol mm) hoặc nằm trong vùng kín khi lớp đang ở chế độ tô.
+ * Hit test: images → anywhere inside the box;
+ * vectors → near a stroke (tol mm), or inside a closed area when the layer is in fill mode.
  */
 export function hitItem(it: Item, p: Pt, tol: number, filled: boolean): boolean {
   if (p.x < it.x - tol || p.x > it.x + it.w + tol || p.y < it.y - tol || p.y > it.y + it.h + tol) return false;
   if (it.kind === 'bitmap') return true;
-  // Đối tượng nhỏ hơn vài điểm ảnh: trúng khung là đủ
+  // Objects only a few pixels big: hitting the box is enough
   if (it.w < tol * 3 && it.h < tol * 3) return true;
   const paths = placedPaths(it, { x: it.x, y: it.y });
   for (const pl of paths) for (let k = 1; k < pl.length; k++) if (segDist(p, pl[k - 1], pl[k]) <= tol) return true;
   return filled && insideEvenOdd(p, paths);
 }
 
-/** Đối tượng có giao với hình chữ nhật không (dùng cho chọn kiểu "chạm"). */
+/** Does the object intersect the rectangle? (used for crossing selection) */
 export function itemTouchesRect(it: Item, r: Bounds): boolean {
   if (it.x > r.maxX || it.x + it.w < r.minX || it.y > r.maxY || it.y + it.h < r.minY) return false;
   if (it.kind === 'bitmap') return true;
   const inR = (q: Pt) => q.x >= r.minX && q.x <= r.maxX && q.y >= r.minY && q.y <= r.maxY;
   for (const pl of placedPaths(it, { x: it.x, y: it.y })) {
     for (const q of pl) if (inR(q)) return true;
-    // Đoạn thẳng cắt cạnh hình chữ nhật
+    // Segment crosses an edge of the rectangle
     for (let k = 1; k < pl.length; k++) if (segHitsRect(pl[k - 1], pl[k], r)) return true;
   }
   return false;

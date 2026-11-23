@@ -1,6 +1,6 @@
 import { SerialPort, ReadlineParser } from 'serialport';
 
-/** Kích thước bộ đệm RX của GRBL 1.1 (bo Sculpfun S30 cũng dùng 128 byte; chừa 1 byte an toàn). */
+/** GRBL 1.1 RX buffer size (the Sculpfun S30 board also uses 128 bytes; keep 1 byte spare). */
 const RX_BUFFER_SIZE = 127;
 
 export interface JobProgress {
@@ -19,9 +19,9 @@ export interface GrblEvents {
 }
 
 /**
- * Kết nối GRBL qua cổng COM, dùng giao thức "character counting":
- * gửi liên tục miễn là tổng số byte đang nằm trong bộ đệm GRBL <= 127.
- * Mỗi "ok"/"error" trả về giải phóng dòng cũ nhất.
+ * GRBL connection over a COM port using the "character counting" protocol:
+ * keep sending while the bytes sitting in GRBL's buffer stay <= 127.
+ * Each "ok"/"error" reply frees the oldest line.
  */
 export class GrblConnection {
   private port: SerialPort | null = null;
@@ -70,14 +70,14 @@ export class GrblConnection {
     this.resetQueue();
   }
 
-  /** Lệnh thời gian thực (không vào hàng đợi): '?', '!', '~', 0x18, 0x85 ... */
+  /** Real-time commands (bypass the queue): '?', '!', '~', 0x18, 0x85 ... */
   realtime(byte: number | string) {
     if (!this.port?.isOpen) return;
     const buf = typeof byte === 'number' ? Buffer.from([byte]) : Buffer.from(byte, 'latin1');
     this.port.write(buf);
   }
 
-  /** Gửi một/lô lệnh tay (MDI, jog, đặt gốc). */
+  /** Send one or more manual commands (MDI, jog, set origin). */
   send(lines: string[]) {
     for (const l of lines) {
       const s = l.trim();
@@ -111,7 +111,7 @@ export class GrblConnection {
     }
   }
 
-  /** Dừng khẩn: reset mềm (Ctrl-X) — GRBL tắt laser và xóa bộ đệm ngay. */
+  /** Emergency stop: soft reset (Ctrl-X) — GRBL turns the laser off and clears its buffer at once. */
   abort() {
     this.queue = [];
     this.inFlight = [];
@@ -165,7 +165,7 @@ export class GrblConnection {
       return;
     }
     if (line.startsWith('ALARM:')) {
-      // Máy báo động: hủy phần còn lại của lệnh
+      // Machine alarm: drop the rest of the job
       this.queue = [];
       this.inFlight = [];
       if (this.job.running) {
@@ -174,7 +174,7 @@ export class GrblConnection {
       }
     }
     if (line.startsWith('Grbl ') || line.startsWith('GrblHAL')) {
-      // Bo mạch vừa khởi động lại → bộ đệm trống
+      // The board just restarted → its buffer is empty
       this.inFlight = [];
     }
     this.ev.onLine(line);
@@ -193,7 +193,7 @@ export class GrblConnection {
   private lastEmit = 0;
   private emitProgress() {
     const now = Date.now();
-    // Giới hạn tần suất cập nhật, nhưng luôn gửi trạng thái kết thúc
+    // Throttle updates, but always send the final state
     if (this.job.running && !this.job.paused && now - this.lastEmit < 100) return;
     this.lastEmit = now;
     this.ev.onProgress({ ...this.job });

@@ -5,7 +5,7 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
-/** Chuyển canvas thành ảnh xám (nền trong suốt được coi là trắng). */
+/** Convert a canvas to grayscale (transparent pixels count as white). */
 export function canvasToBitmap(canvas: HTMLCanvasElement): Bitmap {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const { width, height } = canvas;
@@ -33,7 +33,7 @@ export function grayToUrl(gray: Uint8Array, width: number, height: number): stri
   return c.toDataURL('image/png');
 }
 
-/** Giới hạn số điểm ảnh để tránh treo máy với ảnh rất lớn. */
+/** Pixel cap so very large images do not freeze the app. */
 const MAX_PIXELS = 4000 * 4000;
 
 export async function importRaster(data: Uint8Array, mime: string): Promise<{ bitmap: Bitmap; w: number; h: number }> {
@@ -48,7 +48,7 @@ export async function importRaster(data: Uint8Array, mime: string): Promise<{ bi
   c.height = height;
   c.getContext('2d')!.drawImage(img, 0, 0, width, height);
   img.close();
-  // Mặc định 254 DPI (10 điểm/mm); thu nhỏ nếu ảnh to hơn 150mm
+  // Default 254 DPI (10 dots/mm); scale down if larger than 150 mm
   let w = width / 10;
   let h = height / 10;
   const s = Math.min(1, 150 / Math.max(w, h));
@@ -56,13 +56,13 @@ export async function importRaster(data: Uint8Array, mime: string): Promise<{ bi
 }
 
 export interface PdfPage {
-  /** Đường vector để cắt/khắc nét (có thể rỗng) */
+  /** Vector paths for cutting/scoring (may be empty) */
   vector: PdfPageVector;
-  /** Ảnh 300 DPI của cả trang — chỉ tạo khi trang có chữ/ảnh hoặc không có đường vector */
+  /** 300 DPI render of the page — only created when it has text/images or no vector paths */
   raster: { bitmap: Bitmap; w: number; h: number } | null;
 }
 
-/** Đọc PDF/AI: lấy đường vector, kèm ảnh kết xuất nếu trang có chữ hoặc hình ảnh. */
+/** Read PDF/AI: extract vector paths, plus a rendered image when the page has text or images. */
 export async function importPdf(data: Uint8Array): Promise<PdfPage[]> {
   const task = pdfjs.getDocument({ data: data.slice() });
   const doc = await task.promise;
@@ -73,7 +73,7 @@ export async function importPdf(data: Uint8Array): Promise<PdfPage[]> {
       const vector = await pdfPageVectors(page);
       let raster: PdfPage['raster'] = null;
       if (vector.paths.length === 0 || vector.hasText || vector.hasImage) {
-        const base = page.getViewport({ scale: 1 }); // đơn vị pt
+        const base = page.getViewport({ scale: 1 }); // units: pt
         let scale = 300 / 72;
         if (base.width * base.height * scale * scale > MAX_PIXELS) scale = Math.sqrt(MAX_PIXELS / (base.width * base.height));
         const vp = page.getViewport({ scale });

@@ -14,7 +14,7 @@ const mul = (m: M, n: M): M => [
 ];
 const ap = (m: M, x: number, y: number): Pt => ({ x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] });
 
-/** Mã lệnh vẽ đường bên trong constructPath của pdf.js (DrawOPS) */
+/** Path drawing opcodes inside pdf.js constructPath (DrawOPS) */
 const D = { moveTo: 0, lineTo: 1, curveTo: 2, quadraticCurveTo: 3, closePath: 4 };
 const PT_MM = 25.4 / 72;
 
@@ -22,12 +22,12 @@ export interface PdfPageVector {
   paths: Polyline[];
   w: number;
   h: number;
-  /** Trang có chữ hoặc ảnh (không chuyển được thành đường cắt) */
+  /** The page has text or images (which cannot become cut paths) */
   hasText: boolean;
   hasImage: boolean;
 }
 
-/** Trích đường vector từ một trang PDF (mm, trục Y hướng lên, chuẩn hóa về góc dưới-trái). */
+/** Extract vector paths from a PDF page (mm, Y up, normalized to the bottom-left corner). */
 export async function pdfPageVectors(page: pdfjs.PDFPageProxy): Promise<PdfPageVector> {
   const ops = await page.getOperatorList();
   const O = pdfjs.OPS as Record<string, number>;
@@ -72,7 +72,7 @@ export async function pdfPageVectors(page: pdfjs.PDFPageProxy): Promise<PdfPageV
         break;
       case O.constructPath: {
         const paintOp = args[0];
-        if (paintOp === O.endPath) break; // đường cắt xén (clip), không vẽ
+        if (paintOp === O.endPath) break; // clipping path, not drawn
         const data = args[1]?.[0] as ArrayLike<number> | null;
         if (!data) break;
         let cur: Polyline = [];
@@ -117,7 +117,7 @@ export async function pdfPageVectors(page: pdfjs.PDFPageProxy): Promise<PdfPageV
               p = start;
               break;
             default:
-              k = data.length; // định dạng lạ → bỏ qua đường này
+              k = data.length; // unknown format → skip this path
           }
         }
         flush();

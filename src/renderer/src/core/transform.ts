@@ -3,9 +3,9 @@ import { pathsBounds } from './geometry';
 import { grayToUrl } from '../io/image';
 
 /**
- * Xoay (độ, ngược chiều kim đồng hồ) và/hoặc lật đối tượng quanh tâm của nó.
- * Phép biến đổi được "nướng" thẳng vào dữ liệu, nên mọi phần khác (khung bao, khắc, cắt)
- * vẫn làm việc với hình chữ nhật thẳng như cũ.
+ * Rotate (degrees, counter-clockwise) and/or flip an object around its center.
+ * The transform is baked into the data, so everything else (bounds, engraving, cutting)
+ * keeps working with axis-aligned rectangles.
  */
 export function transformItem(item: Item, angleDeg: number, flipX = false, flipY = false): Item {
   const t = (angleDeg * Math.PI) / 180;
@@ -35,7 +35,7 @@ export function transformItem(item: Item, angleDeg: number, flipX = false, flipY
 
   if (item.kind === 'bitmap' && item.bitmap) {
     const bm = item.bitmap;
-    // Đưa ảnh về mật độ điểm ảnh đều theo X/Y (đối tượng có thể đã bị kéo giãn lệch tỉ lệ)
+    // Resample to equal X/Y pixel density (the object may have been stretched)
     const pxPerMM = bm.width / item.w;
     const sw = bm.width;
     const sh = Math.max(1, Math.round(item.h * pxPerMM));
@@ -62,7 +62,7 @@ export function transformItem(item: Item, angleDeg: number, flipX = false, flipY
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, W, H);
     ctx.translate(W / 2, H / 2);
-    ctx.rotate(-t); // canvas có trục Y hướng xuống
+    ctx.rotate(-t); // canvas Y axis points down
     ctx.scale(fx, fy);
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(src, -sw / 2, -sh / 2);

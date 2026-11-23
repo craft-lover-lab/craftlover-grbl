@@ -32,7 +32,7 @@ export function union(a: Bounds, b: Bounds): Bounds {
   };
 }
 
-/** Vị trí góc dưới-trái của từng bản sao của một đối tượng. */
+/** Bottom-left position of every grid copy of an object. */
 export function copyOffsets(item: Item): Pt[] {
   const out: Pt[] = [];
   const { cols, rows, gapX, gapY } = item.copies;
@@ -42,7 +42,7 @@ export function copyOffsets(item: Item): Pt[] {
   return out;
 }
 
-/** Khung bao của đối tượng kể cả các bản sao. */
+/** Bounding box of an object including its grid copies. */
 export function itemBounds(item: Item): Bounds {
   const cols = Math.max(1, item.copies.cols);
   const rows = Math.max(1, item.copies.rows);
@@ -58,7 +58,7 @@ export function itemsBounds(items: Item[]): Bounds {
   return items.reduce((acc, it) => union(acc, itemBounds(it)), emptyBounds());
 }
 
-/** Đường vector của đối tượng đã co giãn và đặt tại vị trí (ox, oy). */
+/** The object's paths, scaled and placed at the given origin. */
 export function placedPaths(item: Item, origin: Pt): Polyline[] {
   if (!item.paths) return [];
   const sx = item.srcW > 0 ? item.w / item.srcW : 1;
@@ -89,9 +89,9 @@ function contains(outer: Bounds, inner: Bounds) {
 }
 
 /**
- * Sắp xếp thứ tự cắt: luôn cắt các đường nằm bên trong trước đường bao ngoài
- * (để chi tiết không bị rơi/lệch), còn lại chọn đường gần nhất để giảm quãng chạy không.
- * Đường kín có thể bắt đầu từ bất kỳ đỉnh nào; đường hở có thể đảo chiều.
+ * Cut ordering: paths inside another path are always cut before the outer outline
+ * (so parts don't drop or shift); otherwise pick the nearest path to reduce travel.
+ * Closed paths may start at any vertex; open paths may be reversed.
  */
 export function optimizeOrder(paths: Polyline[], start: Pt = { x: 0, y: 0 }): Polyline[] {
   const items = paths
@@ -107,7 +107,7 @@ export function optimizeOrder(paths: Polyline[], start: Pt = { x: 0, y: 0 }): Po
     let bestRev = false;
     for (let i = 0; i < items.length; i++) {
       if (done[i]) continue;
-      // Còn đường nằm trong chưa cắt → chưa được cắt đường này
+      // An inner path is still uncut → this one must wait
       let blocked = false;
       for (let j = 0; j < items.length && !blocked; j++)
         if (!done[j] && j !== i && contains(items[i].b, items[j].b)) blocked = true;
@@ -126,7 +126,7 @@ export function optimizeOrder(paths: Polyline[], start: Pt = { x: 0, y: 0 }): Po
       }
     }
     if (best < 0) {
-      // Trường hợp các khung bao trùng nhau hoàn toàn: lấy đường chưa cắt đầu tiên
+      // Identical bounding boxes block each other: take the first uncut path
       best = done.indexOf(false);
       bestIdx = 0;
       bestRev = false;

@@ -1,10 +1,10 @@
-/** Mọi tọa độ tính bằng mm. Trục Y hướng lên (gốc ở góc trước-trái của máy, giống GRBL). */
+/** All coordinates are in mm. Y points up (origin at the machine's front-left corner, like GRBL). */
 export interface Pt {
   x: number;
   y: number;
 }
 
-/** Một đường gấp khúc; nếu điểm cuối trùng điểm đầu thì là đường kín. */
+/** A polyline; it is closed when the last point equals the first. */
 export type Polyline = Pt[];
 
 export type LayerMode = 'line' | 'fill' | 'image';
@@ -14,50 +14,50 @@ export interface Layer {
   id: string;
   name: string;
   color: string;
-  /** line = cắt/vạch theo nét; fill = khắc tô kín vùng vector; image = khắc ảnh */
+  /** line = cut/score along paths; fill = engrave the inside of vectors; image = engrave a picture */
   mode: LayerMode;
-  /** Tốc độ (mm/phút) */
+  /** Speed (mm/min) */
   speed: number;
-  /** Công suất tối đa (% của S max) */
+  /** Maximum power (% of S max) */
   power: number;
-  /** Công suất tối thiểu cho ảnh xám (%) */
+  /** Minimum power for grayscale images (%) */
   minPower: number;
   passes: number;
-  /** Khoảng cách dòng quét khi khắc (mm) */
+  /** Scan line interval when engraving (mm) */
   lineInterval: number;
   dither: DitherMode;
-  /** Ngưỡng đen/trắng 0..255 cho chế độ threshold */
+  /** Black/white threshold 0..255 for threshold mode */
   threshold: number;
-  /** Đi quá biên mỗi dòng quét để tốc độ ổn định (mm) */
+  /** Overscan past each scan line so the speed is steady (mm) */
   overscan: number;
   bidirectional: boolean;
-  /** Bỏ qua lớp khi xuất */
+  /** Skip this layer when running/exporting */
   enabled: boolean;
 }
 
 export interface Bitmap {
   width: number;
   height: number;
-  /** Độ xám 0 (đen) .. 255 (trắng), hàng 0 là hàng TRÊN CÙNG của ảnh */
+  /** Gray level 0 (black) .. 255 (white); row 0 is the TOP row of the image */
   gray: Uint8Array;
-  /** Ảnh xem trước để vẽ lên canvas */
+  /** Preview image drawn on the canvas */
   url: string;
 }
 
 export interface Copies {
   cols: number;
   rows: number;
-  /** Khoảng cách giữa các bản sao (mm) */
+  /** Gap between copies (mm) */
   gapX: number;
   gapY: number;
 }
 
-/** Thông số của hình vẽ trực tiếp, để còn chỉnh lại được (bo góc, số cạnh). */
+/** Parameters of a drawn shape, kept so it stays editable (corner radius, sides). */
 export interface ShapeSpec {
   type: 'rect' | 'ellipse' | 'polygon' | 'line';
-  /** Bán kính bo góc của hình chữ nhật (mm) */
+  /** Rectangle corner radius (mm) */
   radius?: number;
-  /** Số cạnh của đa giác đều */
+  /** Number of sides of a regular polygon */
   sides?: number;
 }
 
@@ -66,13 +66,13 @@ export interface Item {
   name: string;
   kind: 'vector' | 'bitmap';
   shape?: ShapeSpec;
-  /** Đường vector theo tọa độ gốc (đơn vị mm), sẽ được co giãn về w×h */
+  /** Vector paths in source coordinates (mm), scaled to w×h when placed */
   paths?: Polyline[];
   bitmap?: Bitmap;
-  /** Kích thước gốc lúc nhập (mm) — dùng để tính tỉ lệ co giãn */
+  /** Original size at import (mm) — used to compute the scale factor */
   srcW: number;
   srcH: number;
-  /** Vị trí góc dưới-trái và kích thước hiện tại (mm) */
+  /** Current bottom-left position and size (mm) */
   x: number;
   y: number;
   w: number;
@@ -84,25 +84,25 @@ export interface Item {
 export interface MachineProfile {
   bedW: number;
   bedH: number;
-  /** Giá trị $30 của GRBL */
+  /** GRBL's $30 value */
   sMax: number;
   baud: number;
-  /** Tốc độ chạy khung (mm/phút) */
+  /** Framing speed (mm/min) */
   frameSpeed: number;
-  /** Công suất khi chạy khung (%) — thấp để không cháy phôi */
+  /** Framing power (%) — low so the material is not marked */
   framePower: number;
-  /** Tốc độ di chuyển không cắt G0 dùng khi chạy lệnh khắc ảnh */
+  /** Travel (G0) speed used for time estimates */
   travelSpeed: number;
 }
 
 export type OriginMode = 'absolute' | 'current';
-/** 9 điểm neo của vùng cắt, ví dụ 'bl' = dưới-trái, 'c' = tâm */
+/** The 9 anchor points of the job area, e.g. 'bl' = bottom-left, 'c' = center */
 export type Anchor = 'tl' | 't' | 'tr' | 'l' | 'c' | 'r' | 'bl' | 'b' | 'br';
 
 export interface JobOptions {
   originMode: OriginMode;
   anchor: Anchor;
-  /** Vị trí làm việc hiện tại của đầu laser (dùng cho originMode = 'current') */
+  /** Current work position of the laser head (used when originMode = 'current') */
   currentPos: Pt;
 }
 

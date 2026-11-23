@@ -7,7 +7,7 @@ const f = (n: number) => {
   return s.replace(/\.?0+$/, '') || '0';
 };
 
-/** Độ dời áp vào toàn bộ lệnh, tùy theo chế độ gốc tọa độ. */
+/** Offset applied to the whole job, depending on the origin mode. */
 export function jobOffset(items: Item[], opt: JobOptions): Pt {
   if (opt.originMode === 'absolute') return { x: 0, y: 0 };
   const b = itemsBounds(items);
@@ -22,7 +22,7 @@ export function jobBounds(items: Item[], opt: JobOptions): Bounds {
   return { minX: b.minX + o.x, minY: b.minY + o.y, maxX: b.maxX + o.x, maxY: b.maxY + o.y };
 }
 
-/** Danh sách đối tượng sẽ chạy: chỉ lớp đang bật; khắc ảnh/tô trước, cắt sau cùng. */
+/** Work to run: enabled layers only; image/fill engraving first, cuts last. */
 function orderedWork(items: Item[], layers: Layer[]) {
   const rank = { image: 0, fill: 1, line: 2 } as const;
   return layers
@@ -36,9 +36,9 @@ function orderedWork(items: Item[], layers: Layer[]) {
 export interface GcodeResult {
   lines: string[];
   bounds: Bounds;
-  /** Ước lượng thời gian chạy (giây), chưa tính gia tốc */
+  /** Estimated run time (seconds), ignoring acceleration */
   seconds: number;
-  /** Đường di chuyển để xem trước (đã cộng độ dời) */
+  /** Toolpaths for the preview (offset already applied) */
   preview: { cut: Polyline[]; travel: Polyline[] };
 }
 
@@ -65,7 +65,7 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
 
   for (const { layer, items: its } of orderedWork(items, layers)) {
     out.push(`; ---- Layer ${layer.id} (${layer.mode}) speed ${layer.speed} mm/min, power ${layer.power}%, ${layer.passes} pass(es)`);
-    // M4 = công suất động: GRBL tự giảm công suất khi đầu laser chạy chậm ở góc → nét đều hơn
+    // M4 = dynamic power: GRBL lowers power when the head slows down in corners → more even lines
     out.push('M4 S0');
     for (let pass = 0; pass < Math.max(1, layer.passes); pass++) {
       if (layer.passes > 1) out.push(`; Pass ${pass + 1}/${layer.passes}`);
@@ -101,7 +101,7 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
     let dirLTR = true;
     let firstF = true;
     for (let row = r.rows - 1; row >= 0; row--) {
-      // Hàng ảnh dưới cùng ứng với Y nhỏ nhất
+      // The bottom image row maps to the smallest Y
       const y = o.y + (r.rows - 1 - row + 0.5) * r.py;
       const base = row * r.cols;
       let a = -1;
@@ -111,7 +111,7 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
           if (a < 0) a = c;
           b = c;
         }
-      if (a < 0) continue; // hàng trắng → bỏ qua
+      if (a < 0) continue; // blank row → skip
       const xL = o.x + a * r.px;
       const xR = o.x + (b + 1) * r.px;
       const ltr = layer.bidirectional ? dirLTR : true;
@@ -152,8 +152,8 @@ function range(a: number, b: number) {
 }
 
 /**
- * Chạy khung bao vùng cắt với công suất rất thấp (M3 = công suất cố định) để căn phôi.
- * framePower = 0 → chỉ di chuyển đầu laser, không bật tia.
+ * Trace the job's bounding box at very low power (M3 = constant power) to position the material.
+ * framePower = 0 → move the head only, laser off.
  */
 export function frameGcode(items: Item[], m: MachineProfile, opt: JobOptions): string[] {
   const b = jobBounds(items, opt);

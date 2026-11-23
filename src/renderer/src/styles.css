@@ -58,7 +58,7 @@ textarea { background: #16181c; color: var(--text); border: 1px solid var(--line
 .toolbar > .spacer { min-width: 0; }
 .toolbar > button, .toolbar > label, .toolbar > select { flex: none; }
 
-/* ---------- Trình thiết kế ---------- */
+/* ---------- Designer ---------- */
 .toolbox { width: 46px; display: flex; flex-direction: column; gap: 4px; padding: 6px 4px; background: var(--panel); border-right: 1px solid var(--line); align-items: center; }
 .toolbox button { width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; }
 .toolbox .sides { display: flex; flex-direction: column; align-items: center; font-size: 10px; color: var(--muted); gap: 2px; }

@@ -92,7 +92,7 @@ export function useGrbl() {
       await window.laser.open(path, baud);
       setConnected(true);
       push(t('log.connected', { port: path, baud }));
-      // Bo GRBL thường tự reset khi mở cổng; gửi thêm $I để xác nhận phiên bản
+      // GRBL boards usually reset when the port opens; send $I to confirm the version
       setTimeout(() => window.laser.send(['$I']), 1500);
     },
     [push],
@@ -133,7 +133,7 @@ function parseStatus(line: string, wco: Pt): GrblStatus {
       st.spindle = n[1] ?? 0;
     }
   }
-  // GRBL chỉ gửi WCO định kỳ; tự tính vị trí còn thiếu
+  // GRBL only reports WCO now and then; derive the missing position
   if (hasM && !hasW) st.wpos = { x: st.mpos.x - wco.x, y: st.mpos.y - wco.y };
   if (hasW && !hasM) st.mpos = { x: st.wpos.x + wco.x, y: st.wpos.y + wco.y };
   return st;

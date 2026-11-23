@@ -1,6 +1,6 @@
 import type { Key } from './en';
 
-/** Tiếng Việt. Mọi khóa của bản tiếng Anh đều phải có ở đây (TypeScript sẽ báo nếu thiếu). */
+/** Vietnamese. Every key of the English dictionary must exist here (TypeScript reports missing ones). */
 export const vi: Record<Key, string> = {
   'app.name': 'CraftLover GRBL',
   'lang.label': 'Ngôn ngữ',

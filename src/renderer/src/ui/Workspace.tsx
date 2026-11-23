@@ -19,11 +19,11 @@ interface Props {
   polygonSides: number;
   activeLayer: Layer | undefined;
   onSelect: (ids: string[]) => void;
-  /** Ghi lịch sử hoàn tác trước khi bắt đầu kéo */
+  /** Record an undo step before a drag starts */
   onBeginEdit: () => void;
-  /** Cập nhật trực tiếp trong lúc kéo (không ghi lịch sử) */
+  /** Live update while dragging (no history) */
   onLive: (fn: (items: Item[]) => Item[]) => void;
-  /** Thay đổi một bước (có ghi lịch sử) */
+  /** Single-step change (recorded in history) */
   onCommit: (fn: (items: Item[]) => Item[]) => void;
   onCreate: (it: NewItem) => void;
   onTextAt: (p: Pt) => void;
@@ -74,7 +74,7 @@ export function Workspace(p: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
-  const [view, setView] = useState({ scale: 1.5, ox: 40, oy: 40 }); // ox/oy: vị trí màn hình của gốc (0,0) tính từ góc dưới-trái
+  const [view, setView] = useState({ scale: 1.5, ox: 40, oy: 40 }); // ox/oy: screen position of the (0,0) origin, measured from the bottom-left
   const drag = useRef<Drag | null>(null);
   const [tick, setTick] = useState(0);
   const [overlay, setOverlay] = useState<Overlay>({});
@@ -103,13 +103,13 @@ export function Workspace(p: Props) {
     setView({ scale: s, ox: (size.w - p.bedW * s) / 2, oy: (size.h - p.bedH * s) / 2 });
   }, [size, p.bedW, p.bedH]);
 
-  // Đổi công cụ → hủy nét bút đang vẽ dở
+  // Switching tools cancels an unfinished pen path
   useEffect(() => setPen([]), [p.tool]);
 
   const toS = (x: number, y: number) => [view.ox + x * view.scale, size.h - (view.oy + y * view.scale)] as const;
   const toMM = (sx: number, sy: number): Pt => ({ x: (sx - view.ox) / view.scale, y: (size.h - sy - view.oy) / view.scale });
 
-  // ---------- Bút vẽ đường gấp khúc ----------
+  // ---------- Pen (polyline) tool ----------
   const finishPen = (close: boolean) => {
     const pts = close && pen.length > 2 ? [...pen, { ...pen[0] }] : pen;
     setPen([]);
@@ -153,7 +153,7 @@ export function Workspace(p: Props) {
     };
   });
 
-  // ---------- Vẽ ----------
+  // ---------- Rendering ----------
   useEffect(() => {
     const c = cv.current!;
     const dpr = window.devicePixelRatio || 1;
@@ -171,7 +171,7 @@ export function Workspace(p: Props) {
         else ctx.lineTo(x, y);
       });
 
-    // Bàn máy & lưới (lưới 1 mm khi phóng to đủ lớn)
+    // Bed and grid (1 mm grid when zoomed in far enough)
     const [bx0, by0] = toS(0, 0);
     const [bx1, by1] = toS(p.bedW, p.bedH);
     ctx.fillStyle = '#f4f1ea';
@@ -207,7 +207,7 @@ export function Workspace(p: Props) {
       ctx.fillText(String(g), bx0 - 26, y + 4);
     }
 
-    // Đối tượng
+    // Objects
     const layerOf = (id: string) => p.layers.find((l) => l.id === id);
     for (const it of p.items) {
       const layer = layerOf(it.layerId);
@@ -233,7 +233,7 @@ export function Workspace(p: Props) {
       ctx.globalAlpha = 1;
     }
 
-    // Xem trước đường chạy
+    // Toolpath preview
     if (p.preview) {
       ctx.setLineDash([3, 4]);
       ctx.strokeStyle = 'rgba(80,110,160,.6)';
@@ -248,7 +248,7 @@ export function Workspace(p: Props) {
       ctx.stroke();
     }
 
-    // Đối tượng đang chọn: nét đứt xanh chồng lên
+    // Selected objects: blue dashed overlay
     if (selItems.length) {
       ctx.setLineDash([4, 3]);
       ctx.strokeStyle = '#1a5fd6';
@@ -260,7 +260,7 @@ export function Workspace(p: Props) {
           ctx.rect(x0, y0, it.w * view.scale, it.h * view.scale);
         } else placedPaths(it, it).forEach(line);
         ctx.stroke();
-        // Khung của các bản sao lưới
+        // Outline of the grid copies
         if (it.copies.cols * it.copies.rows > 1) {
           const b = itemBounds(it);
           const [x0, y0] = toS(b.minX, b.maxY);
@@ -273,7 +273,7 @@ export function Workspace(p: Props) {
       ctx.setLineDash([]);
     }
 
-    // Khung chọn + tay nắm
+    // Selection box + handles
     if (sb && !overlay.rotate) {
       const [x0, y0] = toS(sb.minX, sb.maxY);
       const [x1, y1] = toS(sb.maxX, sb.minY);
@@ -289,7 +289,7 @@ export function Workspace(p: Props) {
         ctx.fillRect(hx - 4, hy - 4, 8, 8);
         ctx.strokeRect(hx - 4, hy - 4, 8, 8);
       }
-      // Tay nắm xoay phía trên
+      // Rotation handle on top
       const [rx, ry] = toS((sb.minX + sb.maxX) / 2, sb.maxY);
       ctx.beginPath();
       ctx.moveTo(rx, ry);
@@ -303,7 +303,7 @@ export function Workspace(p: Props) {
       ctx.fillText(`${(sb.maxX - sb.minX).toFixed(1)} × ${(sb.maxY - sb.minY).toFixed(1)} mm`, x0, y1 + 14);
     }
 
-    // Đang xoay: vẽ khung xoay theo góc
+    // While rotating: draw the rotated box
     if (overlay.rotate) {
       const { c, angle, b } = overlay.rotate;
       const t = (angle * Math.PI) / 180;
@@ -325,7 +325,7 @@ export function Workspace(p: Props) {
       ctx.fillText(`${angle.toFixed(1)}°`, cx + 8, cy - 8);
     }
 
-    // Vùng chọn kéo chuột: trái→phải = chọn trọn, phải→trái = chọn chạm
+    // Marquee: left→right = window select, right→left = crossing select
     if (overlay.marquee) {
       const { a, b } = overlay.marquee;
       const [x0, y0] = toS(a.x, a.y);
@@ -339,7 +339,7 @@ export function Workspace(p: Props) {
       ctx.setLineDash([]);
     }
 
-    // Hình đang vẽ / nét bút
+    // Shape being drawn / pen path
     const ghostColor = p.activeLayer?.color ?? '#e5243b';
     if (overlay.ghost) {
       ctx.strokeStyle = ghostColor;
@@ -361,7 +361,7 @@ export function Workspace(p: Props) {
       }
     }
 
-    // Khung công việc (khi chạy theo vị trí hiện tại)
+    // Job outline (when running from the current position)
     if (p.jobFrame && !isEmpty(p.jobFrame)) {
       const b = p.jobFrame;
       const [x0, y0] = toS(b.minX, b.maxY);
@@ -373,7 +373,7 @@ export function Workspace(p: Props) {
       ctx.setLineDash([]);
     }
 
-    // Gốc làm việc & vị trí đầu laser
+    // Work origin and laser head position
     const [zx, zy] = toS(0, 0);
     ctx.strokeStyle = '#18a058';
     ctx.lineWidth = 2;
@@ -398,7 +398,7 @@ export function Workspace(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.items, p.layers, p.selectedIds, p.preview, p.jobFrame, p.laserPos, p.bedW, p.bedH, view, size, tick, overlay, pen, cursor && p.tool === 'line' ? cursor : null]);
 
-  // ---------- Chuột ----------
+  // ---------- Mouse ----------
   const local = (e: React.MouseEvent) => {
     const r = cv.current!.getBoundingClientRect();
     return { sx: e.clientX - r.left, sy: e.clientY - r.top };
@@ -414,7 +414,7 @@ export function Workspace(p: Props) {
     return null;
   };
 
-  /** Điểm vẽ: bắt dính lưới 0.5 mm (giữ Alt để tắt); Shift giữ góc 15° với điểm trước. */
+  /** Drawing point: snaps to a 0.5 mm grid (hold Alt to disable); Shift locks 15° steps from the previous point. */
   const drawPt = (m: Pt, e: React.MouseEvent, prev?: Pt): Pt => {
     if (prev && e.shiftKey) {
       const d = Math.hypot(m.x - prev.x, m.y - prev.y);
@@ -426,7 +426,7 @@ export function Workspace(p: Props) {
 
   const shapeBox = (a: Pt, b: Pt, square: boolean, fromCenter: boolean) => {
     if (p.tool === 'polygon') {
-      // Đa giác đều: tâm tại điểm bắt đầu, bán kính tới con trỏ
+      // Regular polygon: centered on the start point, radius to the cursor
       const pb = regularPolygonBox(p.polygonSides, Math.hypot(b.x - a.x, b.y - a.y));
       return { x: a.x - pb.cx, y: a.y - pb.cy, w: pb.w, h: pb.h };
     }
@@ -456,7 +456,7 @@ export function Workspace(p: Props) {
         const [fx, fy] = toS(pen[0].x, pen[0].y);
         if (Math.hypot(sx - fx, sy - fy) < 8) return finishPen(true);
       }
-      if (e.detail >= 2) return finishPen(false); // nhấp đúp để kết thúc
+      if (e.detail >= 2) return finishPen(false); // double-click finishes
       setPen((a) => [...a, q]);
       return;
     }
@@ -465,7 +465,7 @@ export function Workspace(p: Props) {
       return;
     }
 
-    // Tay nắm của khung chọn
+    // Selection box handles
     if (sb) {
       const [rx, ry] = toS((sb.minX + sb.maxX) / 2, sb.maxY);
       if (Math.hypot(sx - rx, sy - (ry - 26)) < 8) {
@@ -489,7 +489,7 @@ export function Workspace(p: Props) {
     const hit = topHit(m);
     if (hit) {
       if (e.shiftKey || e.ctrlKey) {
-        // Shift/Ctrl + nhấp: thêm/bớt khỏi vùng chọn
+        // Shift/Ctrl + click: add to / remove from the selection
         p.onSelect(selSet.has(hit.id) ? p.selectedIds.filter((i) => i !== hit.id) : [...p.selectedIds, hit.id]);
         return;
       }
@@ -524,7 +524,7 @@ export function Workspace(p: Props) {
           d.moved = true;
           p.onBeginEdit();
         }
-        // Shift: chỉ di chuyển theo một trục
+        // Shift: constrain to one axis
         const [mx, my] = e.shiftKey ? (Math.abs(dx) > Math.abs(dy) ? [dx, 0] : [0, dy]) : [dx, dy];
         p.onLive(() => moveItems(d.base, d.ids, mx, my));
         break;
@@ -536,7 +536,7 @@ export function Workspace(p: Props) {
         const h0 = b.maxY - b.minY || 1;
         let sxk = h === 't' || h === 'b' ? 1 : Math.abs(m.x - opp.x) / w0;
         let syk = h === 'l' || h === 'r' ? 1 : Math.abs(m.y - opp.y) / h0;
-        // Góc: giữ tỉ lệ (Shift để kéo giãn tự do)
+        // Corners keep the aspect ratio (Shift stretches freely)
         if (h.length === 2 && !e.shiftKey) sxk = syk = Math.max(sxk, syk);
         sxk = Math.max(0.01, sxk);
         syk = Math.max(0.01, syk);
@@ -629,7 +629,7 @@ export function Workspace(p: Props) {
     setView({ scale: s, ox: (size.w - p.bedW * s) / 2, oy: (size.h - p.bedH * s) / 2 });
   };
 
-  // Móc kiểm thử: đổi tọa độ mm → tọa độ màn hình để giả lập chuột
+  // Test hook: convert mm to screen coordinates for simulated mouse input
   (window as any).__wsClient = (x: number, y: number) => {
     const [sx, sy] = toS(x, y);
     const r = cv.current!.getBoundingClientRect();
