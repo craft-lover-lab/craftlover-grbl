@@ -44,6 +44,10 @@ declare global {
       listFonts(): Promise<{ name: string; file: string }[]>;
       readFont(file: string): Promise<Uint8Array>;
       setLang(lang: string): Promise<void>;
+      loadLibrary(): Promise<unknown>;
+      saveLibrary(presets: unknown): Promise<void>;
+      exportLibrary(text: string): Promise<boolean>;
+      importLibrary(): Promise<string | null>;
       onLine(cb: (l: string) => void): () => void;
       onProgress(cb: (p: JobProgress) => void): () => void;
       onClosed(cb: () => void): () => void;

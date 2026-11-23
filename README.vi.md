@@ -22,6 +22,7 @@ Phần mềm được cấu hình sẵn cho **Sculpfun S30 10W** và dùng đư�
 - [Cài đặt](#cài-đặt)
 - [Bắt đầu nhanh](#bắt-đầu-nhanh)
 - [Hướng dẫn sử dụng](#hướng-dẫn-sử-dụng)
+- [Thư viện vật liệu và bảng thử](#thư-viện-vật-liệu-và-bảng-thử)
 - [Phím tắt](#phím-tắt)
 - [Thông số gợi ý cho Sculpfun S30 10W](#thông-số-gợi-ý-cho-sculpfun-s30-10w)
 - [An toàn](#an-toàn)
@@ -41,6 +42,12 @@ Phần mềm được cấu hình sẵn cho **Sculpfun S30 10W** và dùng đư�
 - Hoàn tác / làm lại, sao chép / dán, nhân đôi.
 - Bảng màu: mỗi màu là một lớp gia công với tốc độ và công suất riêng.
 
+**Lớp gia công và thư viện vật liệu**
+- Các lớp chạy **theo thứ tự bạn chọn**: kéo thả, hoặc dùng ▲▼. Thêm và xóa lớp được, mọi thay đổi lớp đều hoàn tác được.
+- **Thư viện vật liệu** lưu thông số theo máy, đầu laser, vật liệu và độ dày. Có sẵn các mẫu khởi đầu cho Sculpfun S30 10W.
+- Áp mẫu vào lớp bằng một cú nhấp, lưu lớp thành mẫu mới, nhập/xuất thư viện dạng file JSON.
+- **Bảng thử vật liệu** khắc một lưới tốc độ × công suất có ghi nhãn, giúp tìm thông số phù hợp. Ô đẹp nhất có thể lưu thẳng vào thư viện.
+
 **Nhập file**
 - Vector: SVG, PDF, AI, EPS (EPS cần Ghostscript).
 - Ảnh: JPG, PNG, BMP, GIF, WEBP.
@@ -52,7 +59,7 @@ Phần mềm được cấu hình sẵn cho **Sculpfun S30 10W** và dùng đư�
   - **Khắc tô kín:** tô kín vùng bên trong hình vector.
   - **Khắc ảnh:** chấm Floyd–Steinberg, đen trắng theo ngưỡng, hoặc thang xám.
 - **Nhân bản theo lưới** để cắt nhiều sản phẩm trong một lần.
-- Tự tối ưu thứ tự cắt: cắt chi tiết bên trong trước đường bao ngoài, và chọn đường gần nhất để giảm quãng chạy không.
+- Tự tối ưu thứ tự cắt trong mỗi lớp: cắt chi tiết bên trong trước đường bao ngoài, và chọn đường gần nhất để giảm quãng chạy không.
 - Xem trước đường chạy và thời gian ước tính. Xuất được file G-code.
 
 **Điều khiển máy**
@@ -129,12 +136,12 @@ Ví dụ dưới đây cắt một hình từ file SVG trên Sculpfun S30. Các 
 
 | Khu vực | Chức năng |
 |---|---|
-| Thanh trên cùng | Mở/lưu dự án, nhập file, hoàn tác/làm lại, xem trước đường chạy, xuất G-code, chạy khung, bắt đầu, tạm dừng, dừng, chọn ngôn ngữ. |
+| Thanh trên cùng | Mở/lưu dự án, nhập file, thư viện vật liệu, bảng thử, hoàn tác/làm lại, xem trước đường chạy, xuất G-code, chạy khung, bắt đầu, tạm dừng, dừng, chọn ngôn ngữ. Khi cửa sổ hẹp, một số nút chỉ hiện biểu tượng; rê chuột vào để xem tên. |
 | Cạnh trái | Công cụ vẽ: chọn, bút, chữ nhật, elip, đa giác, chữ. |
 | Thanh thuộc tính | Điểm tham chiếu, X/Y, rộng/cao, xoay, lật, căn chỉnh. |
 | Vùng làm việc | Bàn máy với lưới 10 mm. Gốc tọa độ (0,0) là góc dưới-trái, đánh dấu màu xanh lá. |
 | Bảng màu (phía dưới) | Gán đối tượng vào lớp theo màu. |
-| Cột phải | Kết nối, điều khiển máy, cài đặt công việc, thuộc tính đối tượng, lớp gia công. |
+| Cột phải | Kết nối, điều khiển máy, cài đặt công việc (gồm tên máy và đầu laser), thuộc tính đối tượng, lớp gia công. |
 
 ### Kết nối và điều khiển máy
 
@@ -196,10 +203,15 @@ Mỗi lớp có màu riêng và các thông số sau:
 | Quét 2 chiều | Khắc cả chiều đi lẫn chiều về, nhanh gấp đôi. |
 | Xử lý ảnh | Floyd–Steinberg (chấm, đẹp cho ảnh chụp), Đen trắng (ngưỡng), Thang xám (đổi công suất theo độ đậm). |
 
-- **Đổi lớp:** chọn đối tượng rồi nhấp một màu ở bảng màu phía dưới. Nếu màu đó chưa có lớp, phần mềm tự tạo lớp mới.
+- **Thứ tự chạy:** các lớp chạy **từ trên xuống dưới**, số bên cạnh mỗi lớp là vị trí của nó. Kéo lớp bằng tay nắm ⋮⋮, hoặc mở lớp ra rồi bấm ▲ / ▼.
+  - Thứ tự mặc định: khắc ảnh → khắc tô → khắc nét → cắt. Nên để lớp cắt viền ngoài ở cuối, để phôi không bị xê dịch khi đang khắc.
+  - Ví dụ: muốn khắc hình trước, khắc chữ sau, cuối cùng cắt viền, thì chỉ cần xếp ba lớp theo đúng thứ tự đó.
+- **Thêm / xóa lớp:** bấm **＋** ở đầu bảng để thêm lớp. Muốn xóa, mở lớp ra và bấm 🗑. Lớp còn đối tượng thì không xóa được, hãy chuyển các đối tượng sang lớp khác trước.
+- **Đổi lớp cho đối tượng:** chọn đối tượng rồi nhấp một màu ở bảng màu phía dưới. Nếu màu đó chưa có lớp, phần mềm tự tạo lớp mới.
 - **Màu cho hình vẽ mới:** không chọn gì rồi nhấp một màu.
 - **Bỏ qua một lớp khi chạy:** bỏ tích ô vuông trước tên lớp.
-- **Thứ tự chạy:** khắc ảnh → khắc tô → cắt. Cắt luôn chạy sau cùng để phôi không bị xê dịch khi đang khắc.
+- **Hoàn tác:** thay đổi lớp (thông số, thứ tự, thêm/xóa) hoàn tác được bằng Ctrl+Z, giống như với đối tượng.
+- **Thư viện:** mở một lớp, bấm **📚 Lấy từ thư viện** để nạp thông số, hoặc **⤴ Lưu vào thư viện** để lưu thông số đang dùng.
 - **Tên lớp mặc định** (Cắt, Khắc nét, Khắc tô, Khắc ảnh) tự đổi theo ngôn ngữ giao diện. Tên bạn tự đặt thì giữ nguyên.
 
 ### Cắt nhiều sản phẩm một lần
@@ -215,6 +227,45 @@ Tất cả bản sao được cắt trong cùng một lệnh, và thứ tự c�
 - **■ DỪNG:** gửi lệnh reset mềm (Ctrl-X). Máy dừng và tắt laser ngay lập tức.
 - **⤓ Xuất G-code:** lưu file `.gcode` để chạy bằng phần mềm khác hoặc thẻ nhớ.
 - **💾 Lưu dự án / 📁 Mở:** file `.lzr` lưu toàn bộ đối tượng (kể cả ảnh) và các lớp.
+
+---
+
+## Thư viện vật liệu và bảng thử
+
+![Thư viện vật liệu](docs/images/library-vi.png)
+
+### Thư viện vật liệu
+
+Bấm **📚 Vật liệu** trên thanh công cụ. Mỗi mẫu lưu:
+
+| Trường | Ví dụ |
+|---|---|
+| Máy / đầu laser | Sculpfun S30 · 10W diode |
+| Vật liệu / độ dày | Ván ép · 3 mm |
+| Thao tác | Cắt, Vạch nét, Khắc tô, Khắc ảnh… |
+| Thông số | Chế độ, tốc độ, công suất, số lượt, khoảng dòng, xử lý ảnh |
+| Ghi chú | Bất cứ điều gì cần nhớ (bật thổi khí, dán 2 lớp băng keo giấy…) |
+
+- **Lọc theo máy:** mặc định danh sách chỉ hiện các mẫu của máy và đầu laser đang đặt trong bảng **Công việc**. Bỏ tích ô lọc để xem tất cả.
+- **Áp dụng cho lớp:** mở một lớp, bấm **📚 Lấy từ thư viện**, rồi bấm **Áp dụng** ở mẫu muốn dùng. Mẫu khắc ảnh chỉ áp được cho lớp khắc ảnh, mẫu vector chỉ áp được cho lớp vector.
+- **Lưu:** bấm **⤴ Lưu vào thư viện** ở một lớp, hoặc **＋ Mẫu mới** trong thư viện. Mẫu sửa được (✎), nhân bản được (⧉) và xóa được (🗑).
+- **Nhập / xuất:** chia sẻ thư viện dưới dạng file `.json`. Khi nhập, mẫu trùng mã sẽ được cập nhật, mẫu mới sẽ được thêm vào.
+- **Nơi lưu:** thư viện tự lưu trong thư mục cài đặt của ứng dụng (`materials.json`). Lần đầu mở, thư viện có sẵn các mẫu khởi đầu cho Sculpfun S30 10W.
+
+### Bảng thử vật liệu
+
+![Bảng thử vật liệu](docs/images/test-grid-vi.png)
+
+1. Bấm **🧪 Bảng thử** rồi chọn:
+   - kiểu ô: ô tô kín để khắc, hoặc viền ô để cắt/vạch;
+   - khoảng tốc độ và số bước (số cột);
+   - khoảng công suất và số bước (số hàng);
+   - cỡ ô, khoảng cách, số lượt và vị trí đặt bảng.
+2. Bấm **Tạo**. Phần mềm tạo một lưới ô, mỗi ô có tốc độ và công suất riêng. Nếu bật ghi nhãn, giá trị tốc độ được khắc phía trên các cột và giá trị công suất bên trái các hàng, trên một lớp riêng chạy công suất thấp.
+3. Chạy khung, chạy thử trên một miếng phôi vụn, rồi chọn ô đẹp nhất.
+4. Chọn ô đó trên màn hình. Bảng **Đối tượng** hiện mục **Thông số riêng**. Bấm **⤴ Lưu thành mẫu vật liệu**, nhập vật liệu và độ dày, rồi lưu.
+
+Hai lớp của bảng thử được đặt lên đầu danh sách lớp, nên bảng thử chạy trước mọi thứ khác trên bàn. Thử xong thì xóa đi.
 
 ---
 
@@ -302,7 +353,7 @@ src/
 │   ├── main.ts           Cửa sổ, IPC, chế độ chụp màn hình tự động
 │   └── preload.ts
 └── renderer/src/
-    ├── core/             Hình học, sinh G-code, khắc raster, dò viền, hình vẽ
+    ├── core/             Hình học, G-code, khắc raster, dò viền, hình vẽ, vật liệu, bảng thử
     ├── io/               Đọc SVG, PDF vector, ảnh, chữ, dự án .lzr
     ├── i18n/             Bản dịch (en, vi)
     ├── machine/          Trạng thái máy (useGrbl)
@@ -337,6 +388,7 @@ Mọi đóng góp đều được chào đón: hãy mở *Issue* để báo lỗ
 ## Lộ trình
 
 - [ ] Bộ cài `.exe` cho Windows
+- [ ] Sửa lại chữ sau khi đã đặt
 - [ ] Sửa từng điểm nút của đường, ghép/cắt hình (boolean), nhóm đối tượng
 - [ ] Mô phỏng quá trình cắt theo thời gian
 - [ ] Tự tách lớp theo màu nét trong file SVG

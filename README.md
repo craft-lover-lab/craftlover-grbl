@@ -21,6 +21,7 @@ It ships with settings for the **Sculpfun S30 10W** and works with most GRBL-bas
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [User guide](#user-guide)
+- [Material library and test grid](#material-library-and-test-grid)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Starting settings for a Sculpfun S30 10W](#starting-settings-for-a-sculpfun-s30-10w)
 - [Safety](#safety)
@@ -42,6 +43,12 @@ It ships with settings for the **Sculpfun S30 10W** and works with most GRBL-bas
 - Undo / redo, copy / paste and duplicate.
 - A color palette where every color is a layer with its own speed and power.
 
+**Layers and material library**
+- Layers run **in the order you choose**: drag them, or use ▲▼. You can add and delete layers, and every layer change can be undone.
+- A **material library** stores settings per machine, laser head, material and thickness. It comes with starting presets for the Sculpfun S30 10W.
+- Apply a preset to a layer in one click, save a layer as a new preset, and import or export the library as JSON.
+- A **material test grid** engraves a speed × power matrix with labels, so you can find the right settings. Save the best square straight into the library.
+
 **Import**
 - Vector files: SVG, PDF, AI, and EPS (EPS needs Ghostscript).
 - Images: JPG, PNG, BMP, GIF, WEBP.
@@ -53,7 +60,7 @@ It ships with settings for the **Sculpfun S30 10W** and works with most GRBL-bas
   - **Fill:** engrave the inside of vector shapes.
   - **Image:** engrave a picture, using Floyd–Steinberg dithering, a black-and-white threshold, or grayscale.
 - **Grid copies:** cut many identical parts in one job.
-- Optimized cut order: inner shapes are cut before outer outlines, and the nearest path is picked next to reduce travel.
+- Optimized cut order within each layer: inner shapes are cut before outer outlines, and the nearest path is picked next to reduce travel.
 - Toolpath preview with a time estimate. G-code export.
 
 **Machine control**
@@ -130,12 +137,12 @@ This example cuts a shape from an SVG file on a Sculpfun S30.
 
 | Area | What it does |
 |---|---|
-| Top toolbar | Open/save project, import, undo/redo, toolpath preview, export G-code, frame, start, pause, stop, and the language menu. |
+| Top toolbar | Open/save project, import, material library, test grid, undo/redo, toolpath preview, export G-code, frame, start, pause, stop, and the language menu. On narrow windows some buttons show only their icon; hover for the name. |
 | Left toolbar | Drawing tools: select, pen, rectangle, ellipse, polygon, text. |
 | Property bar | Reference point, X/Y, width/height, rotation, flip, alignment. |
 | Workspace | The machine bed with a 10 mm grid. The origin (0,0) is the bottom-left corner, marked in green. |
 | Palette (bottom) | Assigns objects to layers by color. |
-| Right column | Machine connection, jog controls, job settings, object properties, layers. |
+| Right column | Machine connection, jog controls, job settings (including machine name and laser head), object properties, layers. |
 
 ### Machine connection and control
 
@@ -197,10 +204,15 @@ Each layer has a color and the following settings:
 | Bidirectional | Engrave in both directions, which is about twice as fast. |
 | Image mode | Floyd–Steinberg (dots, good for photos), Black & white (threshold), or Grayscale (power varies with darkness). |
 
+- **Run order:** layers run **from top to bottom**, and the number next to each layer shows its position. Drag a layer by its ⋮⋮ handle, or open it and use ▲ / ▼.
+  - Default order: image engrave → fill engrave → score → cut. Keep the outer cut last, so parts don't shift while they are being engraved.
+  - Example: engrave a picture first, then text, then cut the outline — just order the three layers that way.
+- **Add / delete layers:** use **＋** in the panel header to add a layer. To delete one, open it and click 🗑. A layer that still has objects can't be deleted, so move them to another layer first.
 - **Change an object's layer:** select it, then click a color in the palette at the bottom. If no layer uses that color yet, a new one is created.
 - **Color for new shapes:** click a color with nothing selected.
 - **Skip a layer:** untick the checkbox next to its name.
-- **Run order:** image engrave → fill engrave → cut. Cuts always come last, so parts don't shift while they are being engraved.
+- **Undo:** layer changes (settings, order, add/delete) can be undone with Ctrl+Z, just like changes to objects.
+- **Library:** open a layer and click **📚 From library** to load a preset, or **⤴ Save to library** to store the current settings.
 
 ### Cutting many parts at once
 
@@ -215,6 +227,45 @@ All copies are cut in one job, and the cut order is optimized across the whole b
 - **■ STOP:** sends a soft reset (Ctrl-X). The machine stops and the laser switches off immediately.
 - **⤓ Export G-code:** saves a `.gcode` file you can run with another sender or from an SD card.
 - **💾 Save project / 📁 Open:** a `.lzr` file stores all objects (including images) and layers.
+
+---
+
+## Material library and test grid
+
+![Material library](docs/images/library.png)
+
+### Material library
+
+Click **📚 Materials** in the toolbar. Each preset stores:
+
+| Field | Example |
+|---|---|
+| Machine / laser head | Sculpfun S30 · 10W diode |
+| Material / thickness | Plywood · 3 mm |
+| Operation | Cut, Score, Fill engrave, Photo engrave… |
+| Settings | Mode, speed, power, passes, line interval, image mode |
+| Notes | Anything you want to remember (air assist on, two coats of masking tape…) |
+
+- **Machine filter:** by default the list only shows presets for the machine and laser head set in the **Job** panel. Untick the filter to see every preset.
+- **Apply to a layer:** open a layer, click **📚 From library**, then click **Apply** on a preset. Image presets can only be applied to image layers, and vector presets only to vector layers.
+- **Save:** use **⤴ Save to library** on a layer, or **＋ New preset** in the library. Presets can be edited (✎), duplicated (⧉) and deleted (🗑).
+- **Import / export:** share your library as a `.json` file. When importing, presets with the same id are updated and new ones are added.
+- **Storage:** the library is saved automatically in the app's settings folder (`materials.json`). On first start it is filled with starting presets for the Sculpfun S30 10W.
+
+### Material test grid
+
+![Material test grid](docs/images/test-grid.png)
+
+1. Click **🧪 Test grid** and choose:
+   - the cell type: filled squares for engraving, or outlines for cutting/scoring;
+   - the speed range and the number of steps (columns);
+   - the power range and the number of steps (rows);
+   - the cell size, gap, number of passes and position.
+2. Click **Create**. You get a grid where every square has its own speed and power. With labels enabled, the speed values are printed above the columns and the power values to the left of the rows, on a separate low-power layer.
+3. Frame it, run it on a scrap of your material, and pick the best square.
+4. Select that square on screen. The object panel shows its **Own settings**. Click **⤴ Save as material preset**, enter the material and thickness, and save.
+
+The two test layers are placed at the top of the layer list, so the test runs before anything else on the bed. Delete them when you're done.
 
 ---
 
@@ -302,7 +353,7 @@ src/
 │   ├── main.ts           Window, IPC, automated snapshot mode
 │   └── preload.ts
 └── renderer/src/
-    ├── core/             Geometry, G-code generation, raster engraving, tracing, shapes
+    ├── core/             Geometry, G-code, raster engraving, tracing, shapes, materials, test grid
     ├── io/               SVG, vector PDF, images, text, .lzr projects
     ├── i18n/             Translations (en, vi)
     ├── machine/          Machine state hook (useGrbl)
@@ -337,6 +388,7 @@ Contributions are welcome: open an *Issue* to report a bug or suggest a feature,
 ## Roadmap
 
 - [ ] Windows installer (`.exe`)
+- [ ] Editable text after placing it
 - [ ] Node editing, boolean operations (weld / subtract), grouping
 - [ ] Animated cut simulation
 - [ ] Automatic layer split by stroke color when importing SVG

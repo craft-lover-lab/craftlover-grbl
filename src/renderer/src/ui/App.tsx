@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Anchor, Item, JobOptions, Layer, MachineProfile, OriginMode, Pt } from '../core/types';
+import type { Anchor, Item, JobOptions, Layer, MachineProfile, MaterialPreset, OriginMode, Pt } from '../core/types';
 import { itemBounds, uid } from '../core/geometry';
 import { frameGcode, generateJob, jobBounds } from '../core/gcode';
 import { importSvg } from '../io/svg';
@@ -12,11 +12,18 @@ import { allTranslations, errorText, LANGS, setLang, t, useLang, type Key, type 
 import { Workspace, type NewItem, type Tool } from './Workspace';
 import { TextDialog } from './TextDialog';
 import { useHistory } from './useHistory';
-import { Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
+import { MaterialLibrary } from './MaterialLibrary';
+import { TestGridDialog } from './TestGridDialog';
+import { migrateLegacyOrder } from '../core/layers';
+import { builtinPresets, normalizePresets, presetFromLayer, presetToLayer } from '../core/materials';
+import { buildTestGrid, type TestGridOptions } from '../core/testGrid';
+import { PALETTE, Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
 import { ConnectionPanel, ItemPanel, JobPanel, JogPanel, LayersPanel } from './Panels';
 import { alignItems, cloneItems, distributeItems, flipItems, moveItems, rotateItems, scaleItems, selBounds } from './designOps';
 
 const DEFAULT_MACHINE: MachineProfile = {
+  name: 'Sculpfun S30',
+  laser: '10W diode',
   bedW: 410,
   bedH: 400,
   sMax: 1000,
@@ -28,13 +35,32 @@ const DEFAULT_MACHINE: MachineProfile = {
 
 const baseLayer = { minPower: 0, passes: 1, lineInterval: 0.1, dither: 'floyd' as const, threshold: 128, overscan: 2.5, bidirectional: true, enabled: true };
 
-/** Default layers, named in the current language. */
+/**
+ * Default layers, named in the current language. Layers run top to bottom,
+ * so engraving comes first and the outer cut last.
+ */
 const defaultLayers = (): Layer[] => [
-  { ...baseLayer, id: 'cut', name: t('layer.cut'), color: '#e5243b', mode: 'line', speed: 300, power: 100 },
-  { ...baseLayer, id: 'score', name: t('layer.score'), color: '#2f7cf6', mode: 'line', speed: 3000, power: 30 },
-  { ...baseLayer, id: 'fill', name: t('layer.fill'), color: '#18a058', mode: 'fill', speed: 6000, power: 40 },
   { ...baseLayer, id: 'image', name: t('layer.image'), color: '#333333', mode: 'image', speed: 3000, power: 50 },
+  { ...baseLayer, id: 'fill', name: t('layer.fill'), color: '#18a058', mode: 'fill', speed: 6000, power: 40 },
+  { ...baseLayer, id: 'score', name: t('layer.score'), color: '#2f7cf6', mode: 'line', speed: 3000, power: 30 },
+  { ...baseLayer, id: 'cut', name: t('layer.cut'), color: '#e5243b', mode: 'line', speed: 300, power: 100 },
 ];
+
+/** Saved layers; lists saved before layer ordering existed are migrated once. */
+function initialLayers(): Layer[] {
+  try {
+    const v = localStorage.getItem('layers');
+    if (!v) return defaultLayers();
+    const ls: Layer[] = JSON.parse(v);
+    return localStorage.getItem('layerOrder') === '2' ? ls : migrateLegacyOrder(ls);
+  } catch {
+    return defaultLayers();
+  }
+}
+
+type Doc = { items: Item[]; layers: Layer[] };
+type Upd<T> = T | ((old: T) => T);
+const apply = <T,>(u: Upd<T>, old: T): T => (typeof u === 'function' ? (u as (o: T) => T)(old) : u);
 
 const COPIES_1 = { cols: 1, rows: 1, gapX: 5, gapY: 5 };
 
@@ -56,18 +82,16 @@ export function App() {
   const lang = useLang();
   const g = useGrbl();
   const [machine, setMachine] = useState<MachineProfile>(() => load('machine', DEFAULT_MACHINE));
-  const [layers, setLayers] = useState<Layer[]>(() => {
-    try {
-      const v = localStorage.getItem('layers');
-      return v ? JSON.parse(v) : defaultLayers();
-    } catch {
-      return defaultLayers();
-    }
-  });
-  // Object list with undo/redo (Ctrl+Z / Ctrl+Y)
-  const hist = useHistory<Item[]>([]);
-  const items = hist.state;
-  const setItems = hist.commit;
+  // Objects and layers share one undo/redo history (Ctrl+Z / Ctrl+Y)
+  const hist = useHistory<Doc>({ items: [], layers: initialLayers() });
+  const { items, layers } = hist.state;
+  const setItems = (u: Upd<Item[]>) => hist.commit((d) => ({ ...d, items: apply(u, d.items) }));
+  const setLayers = (u: Upd<Layer[]>) => hist.commit((d) => ({ ...d, layers: apply(u, d.layers) }));
+  const liveItems = (fn: (a: Item[]) => Item[]) => hist.set((d) => ({ ...d, items: fn(d.items) }));
+  // Material library (persisted by the main process)
+  const [presets, setPresetsState] = useState<MaterialPreset[]>([]);
+  const [libDlg, setLibDlg] = useState<{ target?: Layer; draft?: MaterialPreset } | null>(null);
+  const [testOpen, setTestOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const setSelectedId = (id: string | null) => setSelectedIds(id ? [id] : []);
   const [tool, setTool] = useState<Tool>('select');
@@ -81,24 +105,120 @@ export function App() {
   const [busy, setBusy] = useState('');
 
   useEffect(() => localStorage.setItem('machine', JSON.stringify(machine)), [machine]);
-  useEffect(() => localStorage.setItem('layers', JSON.stringify(layers)), [layers]);
+  useEffect(() => {
+    localStorage.setItem('layers', JSON.stringify(layers));
+    localStorage.setItem('layerOrder', '2');
+  }, [layers]);
+
+  // Load the material library; seed it with the built-in starting points on first run
+  useEffect(() => {
+    window.laser
+      ?.loadLibrary?.()
+      .then((data) => {
+        let list: MaterialPreset[];
+        try {
+          list = data == null ? builtinPresets() : normalizePresets(data);
+        } catch {
+          list = builtinPresets();
+        }
+        setPresetsState(list);
+        if (data == null) window.laser.saveLibrary(list);
+      })
+      .catch(() => setPresetsState(builtinPresets()));
+  }, []);
+  const setPresets = (p: MaterialPreset[]) => {
+    setPresetsState(p);
+    window.laser.saveLibrary(p);
+  };
   // Tell the main process which language to use for native dialogs
   useEffect(() => {
     window.laser?.setLang?.(lang);
     // Default layers whose names were never edited follow the UI language
-    setLayers((ls) =>
-      ls.map((l) => {
+    // (not an undoable edit, so it bypasses the history)
+    hist.set((d) => ({
+      ...d,
+      layers: d.layers.map((l) => {
         const key = `layer.${l.id}` as Key;
         return ['cut', 'score', 'fill', 'image'].includes(l.id) && allTranslations(key).includes(l.name) ? { ...l, name: t(key) } : l;
       }),
-    );
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang]);
 
   const selSet = new Set(selectedIds);
   const selItems = items.filter((i) => selSet.has(i.id));
   const selected = selItems.length === 1 ? selItems[0] : null;
   const patchItem = (id: string, patch: Partial<Item>) => setItems((a) => a.map((i) => (i.id === id ? { ...i, ...patch } : i)));
-  const patchLayer = (id: string, patch: Partial<Layer>) => setLayers((a) => a.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  // Typing into one layer field collapses into a single undo step
+  const patchLayer = (id: string, patch: Partial<Layer>) =>
+    hist.commitMerge(`layer:${id}:${Object.keys(patch).join(',')}`, (d) => ({ ...d, layers: d.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)) }));
+  const layerCounts = items.reduce<Record<string, number>>((m, i) => ((m[i.layerId] = (m[i.layerId] ?? 0) + 1), m), {});
+
+  /** First palette color not used by any layer. */
+  const freeColor = (ls: Layer[] = layers) => PALETTE.find((c) => !ls.some((l) => l.color.toLowerCase() === c)) ?? PALETTE[ls.length % PALETTE.length];
+
+  function addLayer() {
+    const l: Layer = { ...baseLayer, id: uid(), name: t('layer.new', { n: layers.length + 1 }), color: freeColor(), mode: 'line', speed: 1000, power: 20 };
+    setLayers((a) => [...a, l]);
+  }
+
+  function removeLayer(id: string) {
+    const l = layers.find((x) => x.id === id);
+    if (!l) return;
+    if (layers.length <= 1) return alert(t('layers.lastOne'));
+    if (layerCounts[id]) return alert(t('layers.inUse', { name: l.name, n: layerCounts[id] }));
+    setLayers((a) => a.filter((x) => x.id !== id));
+    if (activeLayerId === id) setActiveLayerId(layers.find((x) => x.id !== id)!.id);
+  }
+
+  function moveLayer(from: number, to: number) {
+    if (to < 0 || to >= layers.length || from === to) return;
+    setLayers((a) => {
+      const b = [...a];
+      const [x] = b.splice(from, 1);
+      b.splice(to, 0, x);
+      return b;
+    });
+  }
+
+  function applyPreset(layerId: string, pr: MaterialPreset) {
+    setLayers((a) => a.map((l) => (l.id === layerId ? { ...l, ...presetToLayer(pr) } : l)));
+  }
+
+  /** "Save as material preset" from a test cell: the layer settings plus the cell's own speed/power. */
+  function savePresetFromItem(it: Item) {
+    const l = layers.find((x) => x.id === it.layerId);
+    if (!l) return;
+    const draft = presetFromLayer({ ...l, ...it.override }, { machine: machine.name, laser: machine.laser });
+    // The test layer's name means nothing in the library; describe the operation by its mode instead
+    draft.operation = t(`mode.${l.mode}` as Key).replace(/\s*\(.*\)$/, '');
+    setLibDlg({ draft });
+  }
+
+  async function createTestGrid(o: TestGridOptions) {
+    const fonts = await window.laser.listFonts().catch(() => []);
+    const font = fonts.find((f) => /^arial$/i.test(f.name)) ?? fonts.find((f) => /arial|segoe ui|calibri/i.test(f.name)) ?? fonts[0];
+    const used = [...layers];
+    const cellsColor = freeColor(used);
+    const labelsColor = freeColor([...used, { color: cellsColor } as Layer]);
+    const r = await buildTestGrid(
+      o,
+      {
+        cells: t('test.cellsLayer'),
+        labels: t('test.labelsLayer'),
+        cell: (sp, pw) => t('test.cellName', { speed: sp, power: pw }),
+        speedAxis: t('test.speedAxis'),
+        powerAxis: t('test.powerAxis'),
+      },
+      { cells: cellsColor, labels: labelsColor },
+      async (s, size) => (font ? textToPaths(s, font.file, size, 'left').catch(() => null) : null),
+    );
+    // Test layers run before everything else that is already on the bed
+    hist.commit((d) => ({ items: [...d.items, ...r.items], layers: [...r.layers, ...d.layers] }));
+    setSelectedIds(r.items.map((i) => i.id));
+    setTestOpen(false);
+    g.push(t('test.created', { cols: r.speeds.length, rows: r.powers.length }));
+  }
   const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
 
   // Drop selection entries whose objects no longer exist (e.g. after undo)
@@ -272,8 +392,7 @@ export function App() {
     if (!f) return;
     try {
       const p = parseProject(f.text);
-      hist.reset(p.items);
-      setLayers(p.layers);
+      hist.reset({ items: p.items, layers: p.layers });
       setSelectedId(null);
       g.push(t('project.opened', { name: f.name }));
     } catch (e) {
@@ -349,9 +468,18 @@ export function App() {
     if (name === 'align') propActions.align(args[0], !!args[1]);
     if (name === 'undo') hist.undo();
     if (name === 'redo') hist.redo();
+    if (name === 'test') await createTestGrid({ ...(await import('../core/testGrid')).DEFAULT_TEST, ...(args[0] ?? {}) });
+    if (name === 'layers') return layers.map((l, i) => `${i + 1}. ${l.name} (${l.mode}) ${l.speed}/${l.power}%`).join('\n');
+    if (name === 'moveLayer') moveLayer(args[0], args[1]);
+    if (name === 'patchLayer') patchLayer(layers[args[0]].id, args[1]);
+    if (name === 'presets') return presets.length;
+    if (name === 'applyPreset') applyPreset(layers[args[0]].id, presets.find((x) => x.material === args[1] && x.operation === args[2])!);
+    if (name === 'openLib') setLibDlg({ target: layers[args[0]] });
+    if (name === 'openTest') setTestOpen(true);
+    if (name === 'savePreset') savePresetFromItem(items[args[0]]);
     if (name === 'roundtrip') {
       const p = parseProject(serializeProject(items, layers));
-      setItems(p.items);
+      hist.reset({ items: p.items, layers: p.layers });
       return p.items.length;
     }
     if (name === 'fonts') return (await window.laser.listFonts()).slice(0, 3);
@@ -409,12 +537,20 @@ export function App() {
     <div className="app">
       <header className="toolbar">
         <strong className="brand">⚡ {t('app.name')}</strong>
-        <button onClick={openProject} title={t('tb.openTip')}>📁 {t('tb.open')}</button>
+        <button onClick={openProject} title={t('tb.openTip')}>
+          📁 <span className="lbl">{t('tb.open')}</span>
+        </button>
         <button onClick={saveProject} disabled={!items.length} title={t('tb.saveTip')}>
-          💾 {t('tb.save')}
+          💾 <span className="lbl">{t('tb.save')}</span>
         </button>
         <button onClick={() => importFiles()} title={t('tb.importTip')}>
           📥 {t('tb.import')}
+        </button>
+        <button onClick={() => setLibDlg({})} title={t('tb.libraryTip')}>
+          📚 {t('tb.library')}
+        </button>
+        <button onClick={() => setTestOpen(true)} title={t('tb.testTip')}>
+          🧪 {t('tb.test')}
         </button>
         <span className="sep" />
         <button onClick={hist.undo} disabled={!hist.canUndo} title={t('tb.undo')}>↶</button>
@@ -427,7 +563,9 @@ export function App() {
         </label>
         {job && <span className="muted">{t('tb.estimate', { time: fmtTime(job.seconds), n: job.lines.length })}</span>}
         <span className="spacer" />
-        <button onClick={exportGcode} disabled={!items.length}>⤓ {t('tb.export')}</button>
+        <button onClick={exportGcode} disabled={!items.length} title={t('tb.export')}>
+          ⤓ <span className="lbl">{t('tb.export')}</span>
+        </button>
         <button className="warn" onClick={runFrame} disabled={!g.connected || running || !items.length} title={t('tb.frameTip')}>
           ⬚ {t('tb.frame')}
         </button>
@@ -463,8 +601,8 @@ export function App() {
             activeLayer={activeLayer}
             onSelect={setSelectedIds}
             onBeginEdit={hist.checkpoint}
-            onLive={hist.set}
-            onCommit={hist.commit}
+            onLive={liveItems}
+            onCommit={setItems}
             onCreate={createDrawn}
             onTextAt={(pt) => setTextAt(pt)}
             onToolDone={() => setTool('select')}
@@ -478,8 +616,18 @@ export function App() {
           <ConnectionPanel g={g} machine={machine} setMachine={setMachine} />
           <JogPanel g={g} jog={jog} disabled={!g.connected || running} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
-          {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} />}
-          <LayersPanel layers={layers} patch={patchLayer} reset={() => setLayers(defaultLayers())} />
+          {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} />}
+          <LayersPanel
+            layers={layers}
+            counts={layerCounts}
+            patch={patchLayer}
+            reset={() => setLayers((cur) => [...defaultLayers(), ...cur.filter((l) => !['cut', 'score', 'fill', 'image'].includes(l.id))])}
+            add={addLayer}
+            remove={removeLayer}
+            move={moveLayer}
+            fromLib={(l) => setLibDlg({ target: l })}
+            toLib={(l) => setLibDlg({ draft: presetFromLayer(l, { machine: machine.name, laser: machine.laser }) })}
+          />
         </aside>
       </main>
 
@@ -499,6 +647,21 @@ export function App() {
           }}
         />
       )}
+
+      {libDlg && (
+        <MaterialLibrary
+          presets={presets}
+          setPresets={setPresets}
+          machine={{ name: machine.name, laser: machine.laser }}
+          target={libDlg.target}
+          onApply={libDlg.target ? (pr) => applyPreset(libDlg.target!.id, pr) : undefined}
+          draft={libDlg.draft}
+          onClose={() => setLibDlg(null)}
+          log={g.push}
+        />
+      )}
+
+      {testOpen && <TestGridDialog onClose={() => setTestOpen(false)} onCreate={createTestGrid} />}
 
       <footer className="status">
         <span className={`dot ${g.connected ? 'on' : ''}`} /> {g.connected ? g.status.state : t('status.disconnected')}

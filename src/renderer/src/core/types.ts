@@ -79,9 +79,21 @@ export interface Item {
   h: number;
   layerId: string;
   copies: Copies;
+  /** Per-object settings that replace the layer's (used by material-test cells) */
+  override?: LayerOverride;
+}
+
+export interface LayerOverride {
+  speed?: number;
+  power?: number;
+  passes?: number;
 }
 
 export interface MachineProfile {
+  /** Machine name, e.g. "Sculpfun S30" — used to filter the material library */
+  name: string;
+  /** Laser head / module, e.g. "10W diode" */
+  laser: string;
   bedW: number;
   bedH: number;
   /** GRBL's $30 value */
@@ -111,4 +123,28 @@ export interface Bounds {
   minY: number;
   maxX: number;
   maxY: number;
+}
+
+/** One saved set of cut settings in the material library. */
+export interface MaterialPreset {
+  id: string;
+  machine: string;
+  laser: string;
+  /** e.g. "Plywood", "Leather", "Acrylic" */
+  material: string;
+  /** Material thickness (mm) */
+  thickness: number;
+  /** What the settings are for, e.g. "Cut", "Engrave", "Score" */
+  operation: string;
+  mode: LayerMode;
+  speed: number;
+  power: number;
+  minPower: number;
+  passes: number;
+  lineInterval: number;
+  dither: DitherMode;
+  threshold: number;
+  overscan: number;
+  bidirectional: boolean;
+  notes: string;
 }

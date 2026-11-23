@@ -168,6 +168,10 @@ export function JobPanel(p: {
         </div>
       )}
       <div className="grid2">
+        <label>{t('jobp.machine')}</label>
+        <input value={m.name} onChange={(e) => p.setMachine({ ...m, name: e.target.value })} />
+        <label>{t('jobp.laser')}</label>
+        <input value={m.laser} onChange={(e) => p.setMachine({ ...m, laser: e.target.value })} />
         <label>{t('jobp.frameSpeed')}</label>
         <input type="number" value={m.frameSpeed} onChange={(e) => p.setMachine({ ...m, frameSpeed: +e.target.value })} />
         <label>{t('jobp.framePower')}</label>
@@ -185,7 +189,7 @@ export function JobPanel(p: {
 }
 
 // ---------- Properties of the single selected object ----------
-export function ItemPanel({ item, layers, patch, onTrace }: { item: Item; layers: Layer[]; patch: (p: Partial<Item>) => void; onTrace: (o: TraceOptions) => void }) {
+export function ItemPanel({ item, layers, patch, onTrace, onSavePreset }: { item: Item; layers: Layer[]; patch: (p: Partial<Item>) => void; onTrace: (o: TraceOptions) => void; onSavePreset: (it: Item) => void }) {
   const [th, setTh] = useState(128);
   const [smooth, setSmooth] = useState(0.8);
   /** Changing a shape parameter (corner radius, sides) regenerates the paths at the current size */
@@ -243,6 +247,24 @@ export function ItemPanel({ item, layers, patch, onTrace }: { item: Item; layers
           <button onClick={() => onTrace({ threshold: th, minArea: 0.5, smooth })}>✎ {t('item.trace')}</button>
         </>
       )}
+      {item.override && (
+        <>
+          <h4>{t('item.override')}</h4>
+          <div className="muted">{t('item.overrideHint')}</div>
+          <div className="grid4">
+            <label>{t('lp.speed')}</label>
+            <NumField value={item.override.speed ?? 0} min={1} step={10} onCommit={(v) => patch({ override: { ...item.override, speed: v } })} />
+            <label>{t('lp.power')}</label>
+            <NumField value={item.override.power ?? 0} min={0} step={1} onCommit={(v) => patch({ override: { ...item.override, power: Math.min(100, v) } })} />
+          </div>
+          <div className="row wrap">
+            <button className="go" onClick={() => onSavePreset(item)}>
+              ⤴ {t('item.saveToLib')}
+            </button>
+            <button onClick={() => patch({ override: undefined })}>{t('item.overrideClear')}</button>
+          </div>
+        </>
+      )}
       <h4>{t('item.copiesTitle')}</h4>
       <div className="grid4">
         <label>{t('item.cols')}</label>
@@ -259,26 +281,76 @@ export function ItemPanel({ item, layers, patch, onTrace }: { item: Item; layers
   );
 }
 
-// ---------- Layer (cut settings) list ----------
-export function LayersPanel({ layers, patch, reset }: { layers: Layer[]; patch: (id: string, p: Partial<Layer>) => void; reset: () => void }) {
-  const [open, setOpen] = useState<string | null>('cut');
+// ---------- Layer (cut settings) list — runs from top to bottom ----------
+export function LayersPanel(p: {
+  layers: Layer[];
+  counts: Record<string, number>;
+  patch: (id: string, patch: Partial<Layer>) => void;
+  reset: () => void;
+  add: () => void;
+  remove: (id: string) => void;
+  move: (from: number, to: number) => void;
+  fromLib: (l: Layer) => void;
+  toLib: (l: Layer) => void;
+}) {
+  const { layers, patch } = p;
+  const [open, setOpen] = useState<string | null>(null);
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
   return (
     <section className="panel">
       <h3>
         {t('layers.title')}{' '}
-        <button className="tiny" onClick={reset}>
+        <button className="tiny" onClick={p.reset}>
           {t('layers.reset')}
         </button>
+        <button className="tiny" onClick={p.add} title={t('layers.add')}>
+          ＋
+        </button>
       </h3>
-      {layers.map((l) => (
-        <div key={l.id} className="layer">
+      <div className="muted">{t('layers.orderHint')}</div>
+      {layers.map((l, idx) => (
+        <div
+          key={l.id}
+          className={`layer ${dragOver === idx && dragFrom !== idx ? 'drop' : ''}`}
+          draggable
+          onDragStart={(e) => {
+            setDragFrom(idx);
+            e.dataTransfer.effectAllowed = 'move';
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(idx);
+          }}
+          onDragEnd={() => {
+            setDragFrom(null);
+            setDragOver(null);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (dragFrom !== null && dragFrom !== idx) p.move(dragFrom, idx);
+            setDragFrom(null);
+            setDragOver(null);
+          }}
+        >
           <div className="layer-head" onClick={() => setOpen(open === l.id ? null : l.id)}>
+            <span className="grip" title={t('layers.orderHint')}>⋮⋮</span>
+            <span className="order">{idx + 1}</span>
             <input type="checkbox" checked={l.enabled} onClick={(e) => e.stopPropagation()} onChange={(e) => patch(l.id, { enabled: e.target.checked })} />
             <span className="swatch" style={{ background: l.color }} />
             <b>{l.name}</b>
             <span className="muted">{t('layers.summary', { speed: l.speed, power: l.power, passes: l.passes })}</span>
           </div>
           {open === l.id && (
+            <>
+            <div className="row wrap layer-actions">
+              <button disabled={idx === 0} title={t('layers.up')} onClick={() => p.move(idx, idx - 1)}>▲</button>
+              <button disabled={idx === layers.length - 1} title={t('layers.down')} onClick={() => p.move(idx, idx + 1)}>▼</button>
+              <button onClick={() => p.fromLib(l)}>📚 {t('layers.fromLib')}</button>
+              <button onClick={() => p.toLib(l)}>⤴ {t('layers.toLib')}</button>
+              <span className="muted">{t('layers.objects', { n: p.counts[l.id] ?? 0 })}</span>
+              <button title={t('layers.delete')} onClick={() => p.remove(l.id)}>🗑</button>
+            </div>
             <div className="grid2">
               <label>{t('lp.name')}</label>
               <input value={l.name} onChange={(e) => patch(l.id, { name: e.target.value })} />
@@ -327,6 +399,7 @@ export function LayersPanel({ layers, patch, reset }: { layers: Layer[]; patch: 
                 </>
               )}
             </div>
+            </>
           )}
         </div>
       ))}

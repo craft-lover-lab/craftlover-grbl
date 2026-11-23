@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { GrblConnection } from './grbl';
 import { epsToPdf, listFonts, readFont, type FontEntry } from './system';
@@ -80,8 +80,8 @@ ipcMain.handle('grbl:abort', () => grbl.abort());
 
 // Native dialog labels follow the language chosen in the UI
 const DIALOG_TEXT = {
-  en: { graphics: 'Graphics & vectors', all: 'All files', project: 'CraftLover GRBL project' },
-  vi: { graphics: 'Hình & vector', all: 'Tất cả', project: 'Dự án CraftLover GRBL' },
+  en: { graphics: 'Graphics & vectors', all: 'All files', project: 'CraftLover GRBL project', library: 'Material library' },
+  vi: { graphics: 'Hình & vector', all: 'Tất cả', project: 'Dự án CraftLover GRBL', library: 'Thư viện vật liệu' },
 } as const;
 let uiLang: keyof typeof DIALOG_TEXT = 'en';
 const dt = () => DIALOG_TEXT[uiLang];
@@ -117,6 +117,33 @@ ipcMain.handle('file:openProject', async () => {
   const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: dt().project, extensions: ['lzr'] }] });
   if (r.canceled || !r.filePaths[0]) return null;
   return { name: path.basename(r.filePaths[0]), text: await readFile(r.filePaths[0], 'utf8') };
+});
+
+// ---------- Material library: stored as JSON in the app's user-data folder ----------
+const libraryFile = () => path.join(app.getPath('userData'), 'materials.json');
+ipcMain.handle('library:load', async () => {
+  try {
+    return JSON.parse(await readFile(libraryFile(), 'utf8'));
+  } catch {
+    return null; // first run: the renderer seeds the built-in presets
+  }
+});
+ipcMain.handle('library:save', async (_e, presets: unknown) => {
+  // Write to a temp file first so a crash never leaves a half-written library
+  const tmp = libraryFile() + '.tmp';
+  await writeFile(tmp, JSON.stringify(presets, null, 2), 'utf8');
+  await rename(tmp, libraryFile());
+});
+ipcMain.handle('library:export', async (_e, text: string) => {
+  const r = await dialog.showSaveDialog(win!, { defaultPath: 'materials.json', filters: [{ name: dt().library, extensions: ['json'] }] });
+  if (r.canceled || !r.filePath) return false;
+  await writeFile(r.filePath, text, 'utf8');
+  return true;
+});
+ipcMain.handle('library:import', async () => {
+  const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: dt().library, extensions: ['json'] }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  return readFile(r.filePaths[0], 'utf8');
 });
 
 ipcMain.handle('convert:eps', (_e, data: Uint8Array) => epsToPdf(data));

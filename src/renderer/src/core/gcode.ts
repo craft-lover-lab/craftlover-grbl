@@ -22,15 +22,26 @@ export function jobBounds(items: Item[], opt: JobOptions): Bounds {
   return { minX: b.minX + o.x, minY: b.minY + o.y, maxX: b.maxX + o.x, maxY: b.maxY + o.y };
 }
 
-/** Work to run: enabled layers only; image/fill engraving first, cuts last. */
-function orderedWork(items: Item[], layers: Layer[]) {
-  const rank = { image: 0, fill: 1, line: 2 } as const;
-  return layers
-    .filter((l) => l.enabled)
-    .map((l, i) => ({ l, i }))
-    .sort((a, b) => rank[a.l.mode] - rank[b.l.mode] || a.i - b.i)
-    .map(({ l }) => ({ layer: l, items: items.filter((it) => it.layerId === l.id) }))
-    .filter((w) => w.items.length > 0);
+/**
+ * Work to run, in the user's layer order (top of the list runs first). Disabled layers are skipped.
+ * Objects with their own speed/power override (e.g. material-test cells) form separate groups
+ * that use the layer settings merged with the override.
+ */
+export function orderedWork(items: Item[], layers: Layer[]) {
+  const out: { layer: Layer; items: Item[] }[] = [];
+  for (const l of layers) {
+    if (!l.enabled) continue;
+    const groups = new Map<string, Item[]>();
+    for (const it of items) {
+      if (it.layerId !== l.id) continue;
+      const k = it.override ? JSON.stringify(it.override) : '';
+      const g = groups.get(k);
+      if (g) g.push(it);
+      else groups.set(k, [it]);
+    }
+    for (const [k, its] of groups) out.push({ layer: k ? { ...l, ...its[0].override } : l, items: its });
+  }
+  return out;
 }
 
 export interface GcodeResult {

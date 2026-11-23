@@ -22,6 +22,7 @@ export function useHistory<T>(initial: T, limit = 200) {
   }, []);
 
   const checkpoint = useCallback(() => {
+    lastMerge.current = { key: '', time: 0 };
     if (past.current[past.current.length - 1] === cur.current) return;
     past.current.push(cur.current);
     if (past.current.length > limit) past.current.shift();
@@ -37,7 +38,24 @@ export function useHistory<T>(initial: T, limit = 200) {
     [checkpoint, set],
   );
 
+  /**
+   * Like commit(), but consecutive calls with the same key within a short time
+   * collapse into one undo step (e.g. typing into a layer's speed field).
+   */
+  const lastMerge = useRef({ key: '', time: 0 });
+  const commitMerge = useCallback(
+    (key: string, v: T | ((old: T) => T)) => {
+      const now = Date.now();
+      const m = lastMerge.current;
+      if (m.key !== key || now - m.time > 1500) checkpoint();
+      lastMerge.current = { key, time: now };
+      set(v);
+    },
+    [checkpoint, set],
+  );
+
   const undo = useCallback(() => {
+    lastMerge.current = { key: '', time: 0 };
     const p = past.current.pop();
     if (p === undefined) return;
     future.current.push(cur.current);
@@ -61,5 +79,5 @@ export function useHistory<T>(initial: T, limit = 200) {
     setState(v);
   }, []);
 
-  return { state, set, checkpoint, commit, undo, redo, reset, canUndo: past.current.length > 0, canRedo: future.current.length > 0 };
+  return { state, set, checkpoint, commit, commitMerge, undo, redo, reset, canUndo: past.current.length > 0, canRedo: future.current.length > 0 };
 }

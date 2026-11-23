@@ -1,8 +1,10 @@
 import type { Item, Layer } from '../core/types';
 import { grayToUrl } from './image';
+import { migrateLegacyOrder } from '../core/layers';
 import { t } from '../i18n';
 
-const VERSION = 1;
+/** v2: layers run in list order (v1 files are migrated on load) */
+const VERSION = 2;
 
 function toB64(u: Uint8Array) {
   let s = '';
@@ -33,5 +35,6 @@ export function parseProject(text: string): { items: Item[]; layers: Layer[] } {
     if (gray.length !== it.bitmap.width * it.bitmap.height) throw new Error(t('err.imageBroken', { name: it.name }));
     return { ...it, bitmap: { width: it.bitmap.width, height: it.bitmap.height, gray, url: grayToUrl(gray, it.bitmap.width, it.bitmap.height) } };
   });
-  return { items, layers: d.layers };
+  const layers: Layer[] = (d.version ?? 1) < 2 ? migrateLegacyOrder(d.layers) : d.layers;
+  return { items, layers };
 }

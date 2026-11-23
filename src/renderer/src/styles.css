@@ -80,3 +80,24 @@ textarea { background: #16181c; color: var(--text); border: 1px solid var(--line
 .ws-coords { position: absolute; right: 10px; top: 6px; color: var(--muted); font: 11px Consolas, monospace; display: flex; gap: 8px; align-items: center; }
 .ws-coords .tiny { float: none; }
 .toolbar select.lang { width: auto; margin-left: 4px; }
+
+/* ---------- Layer ordering, material library, test grid ---------- */
+.layer[draggable="true"] { cursor: default; }
+.layer.drop { border-color: var(--accent); box-shadow: 0 -2px 0 var(--accent); }
+.layer-head .grip { cursor: grab; color: var(--muted); letter-spacing: -2px; user-select: none; }
+.layer-head .order { min-width: 16px; text-align: center; font-size: 11px; color: var(--muted); }
+.layer-actions button { padding: 2px 7px; font-size: 12px; }
+.layer-actions .muted { margin-left: auto; }
+.modal.wide { width: min(900px, 92vw); max-height: 86vh; }
+.lib-table { overflow: auto; max-height: 52vh; border: 1px solid var(--line); border-radius: 5px; }
+.lib-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.lib-table th, .lib-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.lib-table th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
+.lib-table tr:hover td { background: #2a2e36; }
+.lib-table td.actions { display: flex; gap: 4px; justify-content: flex-end; }
+.lib-table td.actions button { padding: 2px 7px; }
+.grid4.editor input, .grid4.editor select { width: 100%; }
+.grid-test { display: grid; grid-template-columns: auto 1fr 1fr 70px; gap: 5px 8px; align-items: center; }
+.grid-test > label { color: var(--muted); }
+/* Narrow windows: secondary toolbar buttons show only their icon (tooltip keeps the text) */
+@media (max-width: 1600px) { .toolbar .lbl { display: none; } }
