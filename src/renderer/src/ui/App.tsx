@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { Anchor, Item, JobOptions, Layer, MachineProfile, OriginMode } from '../core/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Anchor, Item, JobOptions, Layer, MachineProfile, OriginMode, Pt } from '../core/types';
 import { itemBounds, uid } from '../core/geometry';
 import { frameGcode, generateJob, jobBounds } from '../core/gcode';
 import { importSvg } from '../io/svg';
@@ -7,10 +7,13 @@ import { importPdf, importRaster } from '../io/image';
 import { textToPaths, type TextAlign } from '../io/text';
 import { parseProject, serializeProject } from '../io/project';
 import { traceBitmap, type TraceOptions } from '../core/trace';
-import { transformItem } from '../core/transform';
 import { useGrbl, type PortInfo } from '../machine/useGrbl';
-import { Workspace } from './Workspace';
+import { Workspace, type NewItem, type Tool } from './Workspace';
 import { TextDialog } from './TextDialog';
+import { useHistory } from './useHistory';
+import { NumField, Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
+import { alignItems, cloneItems, distributeItems, flipItems, moveItems, rotateItems, scaleItems, selBounds } from './designOps';
+import { shapePaths } from '../core/shapes';
 
 const DEFAULT_MACHINE: MachineProfile = {
   bedW: 410,
@@ -55,8 +58,17 @@ export function App() {
       return DEFAULT_LAYERS;
     }
   });
-  const [items, setItems] = useState<Item[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Danh sách đối tượng có hoàn tác/làm lại (Ctrl+Z / Ctrl+Y)
+  const hist = useHistory<Item[]>([]);
+  const items = hist.state;
+  const setItems = hist.commit;
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const setSelectedId = (id: string | null) => setSelectedIds(id ? [id] : []);
+  const [tool, setTool] = useState<Tool>('select');
+  const [sides, setSides] = useState(6);
+  const [activeLayerId, setActiveLayerId] = useState('cut');
+  const [textAt, setTextAt] = useState<Pt | null>(null);
+  const clipboard = useRef<Item[]>([]);
   const [originMode, setOriginMode] = useState<OriginMode>('absolute');
   const [anchor, setAnchor] = useState<Anchor>('bl');
   const [showPreview, setShowPreview] = useState(false);
@@ -65,8 +77,17 @@ export function App() {
   useEffect(() => localStorage.setItem('machine', JSON.stringify(machine)), [machine]);
   useEffect(() => localStorage.setItem('layers', JSON.stringify(layers)), [layers]);
 
-  const selected = items.find((i) => i.id === selectedId) ?? null;
+  const selSet = new Set(selectedIds);
+  const selItems = items.filter((i) => selSet.has(i.id));
+  const selected = selItems.length === 1 ? selItems[0] : null;
   const patchItem = (id: string, patch: Partial<Item>) => setItems((a) => a.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
+
+  // Bỏ chọn các đối tượng đã bị xóa (vd. sau khi hoàn tác)
+  useEffect(() => {
+    const ids = new Set(items.map((i) => i.id));
+    if (selectedIds.some((id) => !ids.has(id))) setSelectedIds((s) => s.filter((id) => ids.has(id)));
+  }, [items, selectedIds]);
   const patchLayer = (id: string, patch: Partial<Layer>) => setLayers((a) => a.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
   const jobOpt: JobOptions = { originMode, anchor, currentPos: g.status.wpos };
@@ -137,9 +158,70 @@ export function App() {
     return id;
   }
 
+  function createDrawn(it: NewItem) {
+    const id = uid();
+    setItems((a) => [...a, { ...it, id, copies: { cols: 1, rows: 1, gapX: 5, gapY: 5 } }]);
+    setSelectedId(id);
+  }
+
   function applyTransform(angle: number, fx = false, fy = false) {
-    if (!selected) return;
-    setItems((a) => a.map((i) => (i.id === selected.id ? transformItem(i, angle, fx, fy) : i)));
+    if (!selItems.length) return;
+    if (fx || fy) setItems((a) => flipItems(a, selSet, fx, fy));
+    else {
+      const b = selBounds(selItems);
+      setItems((a) => rotateItems(a, selSet, angle, { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }));
+    }
+  }
+
+  /** Nhấp một màu trong bảng màu: gán đối tượng đang chọn vào lớp màu đó (tạo lớp mới nếu chưa có). */
+  function pickColor(color: string) {
+    let layer = layers.find((l) => l.color.toLowerCase() === color);
+    if (!layer) {
+      layer = { ...baseLayer, id: uid(), name: `Lớp ${layers.length + 1}`, color, mode: 'line', speed: 1000, power: 20 };
+      const nl = layer;
+      setLayers((a) => [...a, nl]);
+    }
+    const target = layer;
+    if (!selItems.length) {
+      setActiveLayerId(target.id);
+      return;
+    }
+    const bad = selItems.filter((i) => (i.kind === 'bitmap') !== (target.mode === 'image'));
+    if (bad.length)
+      g.push(
+        target.mode === 'image'
+          ? `Lớp "${target.name}" là lớp khắc ảnh — bỏ qua ${bad.length} đối tượng vector`
+          : `Lớp "${target.name}" không phải lớp khắc ảnh — bỏ qua ${bad.length} ảnh (đổi chế độ lớp thành "Khắc ảnh" nếu muốn)`,
+      );
+    setItems((a) => a.map((i) => (selSet.has(i.id) && (i.kind === 'bitmap') === (target.mode === 'image') ? { ...i, layerId: target.id } : i)));
+    setActiveLayerId(target.id);
+  }
+
+  const propActions: PropertyActions = {
+    moveTo: (dx, dy) => setItems((a) => moveItems(a, selSet, dx, dy)),
+    resize: (sx, sy, fix) => setItems((a) => scaleItems(a, selSet, fix, sx, sy)),
+    rotate: (deg) => applyTransform(deg),
+    flip: (h, v) => applyTransform(0, h, v),
+    align: (m, toBed) => setItems((a) => alignItems(a, selSet, m, toBed ? { minX: 0, minY: 0, maxX: machine.bedW, maxY: machine.bedH } : undefined)),
+    distribute: (axis) => setItems((a) => distributeItems(a, selSet, axis)),
+  };
+
+  function deleteSelected() {
+    if (!selItems.length) return;
+    setItems((a) => a.filter((i) => !selSet.has(i.id)));
+    setSelectedIds([]);
+  }
+
+  function copySelected() {
+    clipboard.current = selItems;
+  }
+
+  function paste() {
+    if (!clipboard.current.length) return;
+    const c = cloneItems(clipboard.current, 5, -5);
+    clipboard.current = c;
+    setItems((a) => [...a, ...c]);
+    setSelectedIds(c.map((i) => i.id));
   }
 
   function traceSelected(opt: TraceOptions) {
@@ -154,14 +236,16 @@ export function App() {
   }
 
   function duplicateSelected() {
-    if (!selected) return;
-    const b = itemBounds(selected);
-    addItem({ ...selected, name: `${selected.name} (bản sao)` }, { x: b.maxX + 5, y: selected.y });
+    if (!selItems.length) return;
+    const b = selBounds(selItems);
+    const c = cloneItems(selItems, b.maxX - b.minX + 5, 0);
+    setItems((a) => [...a, ...c]);
+    setSelectedIds(c.map((i) => i.id));
   }
 
-  async function addText(t: { text: string; font: string; size: number; align: TextAlign; layerId: string }) {
+  async function addText(t: { text: string; font: string; size: number; align: TextAlign; layerId: string }, at?: Pt) {
     const r = await textToPaths(t.text, t.font, t.size, t.align);
-    addItem({ name: `Chữ: ${t.text.split('\n')[0].slice(0, 20)}`, kind: 'vector', paths: r.paths, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: t.layerId });
+    addItem({ name: `Chữ: ${t.text.split('\n')[0].slice(0, 20)}`, kind: 'vector', paths: r.paths, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: t.layerId }, at);
   }
 
   async function saveProject() {
@@ -173,7 +257,7 @@ export function App() {
     if (!f) return;
     try {
       const p = parseProject(f.text);
-      setItems(p.items);
+      hist.reset(p.items);
       setLayers(p.layers);
       setSelectedId(null);
       g.push(`Đã mở dự án ${f.name}`);
@@ -182,29 +266,47 @@ export function App() {
     }
   }
 
-  // Phím tắt: Delete xóa, mũi tên dịch 1 mm (Shift: 10 mm), Ctrl+D nhân đôi
+  // Phím tắt kiểu phần mềm thiết kế
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !selectedId) return;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const k = e.key.toLowerCase();
+      if (e.ctrlKey) {
+        const fn: Record<string, () => void> = {
+          z: e.shiftKey ? hist.redo : hist.undo,
+          y: hist.redo,
+          c: copySelected,
+          x: () => (copySelected(), deleteSelected()),
+          v: paste,
+          d: duplicateSelected,
+          a: () => setSelectedIds(items.map((i) => i.id)),
+        };
+        if (fn[k]) {
+          e.preventDefault();
+          fn[k]();
+        }
+        return;
+      }
+      const tools: Record<string, Tool> = { v: 'select', l: 'line', r: 'rect', e: 'ellipse', p: 'polygon', t: 'text' };
+      if (tools[k] && !e.altKey) return setTool(tools[k]);
+      if (e.key === 'Escape') {
+        setTool('select');
+        setSelectedIds([]);
+        return;
+      }
+      if (!selItems.length) return;
       const step = e.shiftKey ? 10 : 1;
       const mv: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
-      if (e.key === 'Delete') {
-        setItems((a) => a.filter((i) => i.id !== selectedId));
-        setSelectedId(null);
-      } else if (mv[e.key]) {
+      if (e.key === 'Delete') deleteSelected();
+      else if (mv[e.key]) {
         e.preventDefault();
-        setItems((a) => a.map((i) => (i.id === selectedId ? { ...i, x: i.x + mv[e.key][0], y: i.y + mv[e.key][1] } : i)));
-      } else if (e.ctrlKey && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        duplicateSelected();
+        setItems((a) => moveItems(a, selSet, mv[e.key][0], mv[e.key][1]));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
-
-  const [textOpen, setTextOpen] = useState(false);
 
   // Móc kiểm thử dùng cho chế độ chụp màn hình tự động
   (window as any).__laserAction = async (name: string, ...args: any[]) => {
@@ -214,13 +316,30 @@ export function App() {
     if (name === 'trace') traceSelected({ threshold: 128, minArea: 0.5, smooth: 0.8 });
     if (name === 'text') await addText({ text: args[0], font: args[1], size: args[2], align: 'center', layerId: 'fill' });
     if (name === 'move') setItems((a) => a.map((i, k) => (k === args[0] ? { ...i, x: args[1], y: args[2] } : i)));
+    if (name === 'tool') setTool(args[0]);
+    if (name === 'mouse') {
+      // args[0]: danh sách [loại, x_mm, y_mm, {shiftKey, detail...}]
+      const cvEl = document.querySelector('.workspace canvas')!;
+      for (const [type, x, y, opt] of args[0] as [string, number, number, any][]) {
+        const [cx, cy] = (window as any).__wsClient(x, y);
+        cvEl.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: cx, clientY: cy, button: 0, ...(opt ?? {}) }));
+        await new Promise((r) => setTimeout(r, 40));
+      }
+    }
+    if (name === 'key') window.dispatchEvent(new KeyboardEvent('keydown', { key: args[0], ctrlKey: !!args[1], shiftKey: !!args[2] }));
+    if (name === 'selectAll') setSelectedIds(items.map((i) => i.id));
+    if (name === 'create') createDrawn(args[0]);
+    if (name === 'color') pickColor(args[0]);
+    if (name === 'align') propActions.align(args[0], !!args[1]);
+    if (name === 'undo') hist.undo();
+    if (name === 'redo') hist.redo();
     if (name === 'roundtrip') {
       const p = parseProject(serializeProject(items, layers));
       setItems(p.items);
       return p.items.length;
     }
     if (name === 'fonts') return (await window.laser.listFonts()).slice(0, 3);
-    return items.map((i) => `${i.name} | ${i.kind} ${i.w.toFixed(1)}x${i.h.toFixed(1)} @${i.x.toFixed(1)},${i.y.toFixed(1)} paths=${i.paths?.length ?? 0}`).join('\n');
+    return items.map((i) => `${i.name} | ${i.kind} ${i.w.toFixed(1)}x${i.h.toFixed(1)} @${i.x.toFixed(1)},${i.y.toFixed(1)} paths=${i.paths?.length ?? 0} layer=${layers.find((l) => l.id === i.layerId)?.name}`).join('\n');
   };
   // Móc kiểm thử: cho phép tiến trình chính nạp file mẫu khi chụp màn hình tự động
   (window as any).__laserImport = (files: { name: string; b64: string }[], preview = true) => {
@@ -276,11 +395,12 @@ export function App() {
         <button onClick={openProject} title="Mở dự án .lzr">📁 Mở</button>
         <button onClick={saveProject} disabled={!items.length} title="Lưu dự án .lzr">💾 Lưu dự án</button>
         <button onClick={() => importFiles()}>📥 Nhập file</button>
-        <button onClick={() => setTextOpen(true)}>🔤 Chữ</button>
-        <button onClick={duplicateSelected} disabled={!selected} title="Ctrl+D">⧉ Nhân đôi</button>
-        <button onClick={() => selected && (setItems((a) => a.filter((i) => i.id !== selected.id)), setSelectedId(null))} disabled={!selected}>
-          🗑 Xóa
-        </button>
+        <span className="sep" />
+        <button onClick={hist.undo} disabled={!hist.canUndo} title="Hoàn tác (Ctrl+Z)">↶</button>
+        <button onClick={hist.redo} disabled={!hist.canRedo} title="Làm lại (Ctrl+Y)">↷</button>
+        <button onClick={duplicateSelected} disabled={!selItems.length} title="Nhân đôi (Ctrl+D)">⧉</button>
+        <button onClick={deleteSelected} disabled={!selItems.length} title="Xóa (Delete)">🗑</button>
+        <span className="sep" />
         <label className="chk">
           <input type="checkbox" checked={showPreview} onChange={(e) => setShowPreview(e.target.checked)} /> Xem đường chạy
         </label>
@@ -297,35 +417,50 @@ export function App() {
       </header>
 
       <main className="main">
-        <Workspace
-          bedW={machine.bedW}
-          bedH={machine.bedH}
-          items={items}
-          layers={layers}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onChange={patchItem}
-          laserPos={g.connected ? g.status.wpos : null}
-          jobFrame={originMode === 'current' && items.length ? jobBounds(items, jobOpt) : null}
-          preview={job?.preview ?? null}
-        />
+        <ToolBar tool={tool} setTool={setTool} sides={sides} setSides={setSides} />
+        <div className="design">
+          <PropertyBar sel={selItems} b={selItems.length ? selBounds(selItems) : null} act={propActions} />
+          <Workspace
+            bedW={machine.bedW}
+            bedH={machine.bedH}
+            items={items}
+            layers={layers}
+            selectedIds={selectedIds}
+            tool={tool}
+            polygonSides={sides}
+            activeLayer={activeLayer}
+            onSelect={setSelectedIds}
+            onBeginEdit={hist.checkpoint}
+            onLive={hist.set}
+            onCommit={hist.commit}
+            onCreate={createDrawn}
+            onTextAt={(pt) => setTextAt(pt)}
+            onToolDone={() => setTool('select')}
+            laserPos={g.connected ? g.status.wpos : null}
+            jobFrame={originMode === 'current' && items.length ? jobBounds(items, jobOpt) : null}
+            preview={job?.preview ?? null}
+          />
+          <Palette layers={layers} activeId={activeLayerId} onPick={pickColor} />
+        </div>
         <aside className="side">
           <ConnectionPanel g={g} machine={machine} setMachine={setMachine} />
           <JogPanel g={g} jog={jog} disabled={!g.connected || running} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
-          {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTransform={applyTransform} onTrace={traceSelected} />}
+          {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} />}
           <LayersPanel layers={layers} patch={patchLayer} reset={() => setLayers(DEFAULT_LAYERS)} />
         </aside>
       </main>
 
-      {textOpen && (
+      {textAt && (
         <TextDialog
           layers={layers}
-          onClose={() => setTextOpen(false)}
+          defaultLayerId={activeLayer.mode !== 'image' ? activeLayer.id : undefined}
+          onClose={() => setTextAt(null)}
           onOk={async (t) => {
             try {
-              await addText(t);
-              setTextOpen(false);
+              await addText(t, textAt);
+              setTextAt(null);
+              setTool('select');
             } catch (e) {
               alert((e as Error).message);
             }
@@ -521,45 +656,32 @@ function ItemPanel({
   item,
   layers,
   patch,
-  onTransform,
   onTrace,
 }: {
   item: Item;
   layers: Layer[];
   patch: (p: Partial<Item>) => void;
-  onTransform: (angle: number, fx?: boolean, fy?: boolean) => void;
   onTrace: (o: TraceOptions) => void;
 }) {
-  const [lock, setLock] = useState(true);
-  const [angle, setAngle] = useState(15);
   const [th, setTh] = useState(128);
   const [smooth, setSmooth] = useState(0.8);
-  const ratio = item.h / item.w;
-  const num = (v: number) => Math.round(v * 100) / 100;
+  /** Đổi thông số hình (bo góc, số cạnh) → vẽ lại đường theo kích thước hiện tại */
+  const reshape = (spec: NonNullable<Item['shape']>) => {
+    const paths = shapePaths(spec, item.w, item.h);
+    if (paths) patch({ shape: spec, paths, srcW: item.w, srcH: item.h });
+  };
   return (
     <section className="panel">
       <h3 title={item.name}>Đối tượng: {item.name}</h3>
-      <div className="grid4">
-        <label>X</label>
-        <input type="number" step={0.5} value={num(item.x)} onChange={(e) => patch({ x: +e.target.value })} />
-        <label>Y</label>
-        <input type="number" step={0.5} value={num(item.y)} onChange={(e) => patch({ y: +e.target.value })} />
-        <label>Rộng</label>
-        <input type="number" step={0.5} value={num(item.w)} onChange={(e) => +e.target.value > 0 && patch(lock ? { w: +e.target.value, h: +e.target.value * ratio } : { w: +e.target.value })} />
-        <label>Cao</label>
-        <input type="number" step={0.5} value={num(item.h)} onChange={(e) => +e.target.value > 0 && patch(lock ? { h: +e.target.value, w: +e.target.value / ratio } : { h: +e.target.value })} />
-      </div>
       <div className="row">
-        <label className="chk">
-          <input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} /> Giữ tỉ lệ
-        </label>
-        <button onClick={() => patch({ w: item.srcW, h: item.srcH })}>Cỡ gốc</button>
+        <label>Tên</label>
+        <input value={item.name} onChange={(e) => patch({ name: e.target.value })} />
       </div>
       <div className="row">
         <label>Lớp</label>
         <select value={item.layerId} onChange={(e) => patch({ layerId: e.target.value })}>
           {layers
-            .filter((l) => item.kind === 'vector' || l.mode === 'image')
+            .filter((l) => (item.kind === 'bitmap') === (l.mode === 'image'))
             .map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
@@ -567,18 +689,21 @@ function ItemPanel({
             ))}
         </select>
       </div>
-      <h4>Xoay / lật</h4>
-      <div className="row wrap">
-        <button onClick={() => onTransform(90)} title="Xoay 90° ngược chiều kim đồng hồ">⟲ 90°</button>
-        <button onClick={() => onTransform(-90)} title="Xoay 90° theo chiều kim đồng hồ">⟳ 90°</button>
-        <button onClick={() => onTransform(0, true, false)}>⇋ Lật ngang</button>
-        <button onClick={() => onTransform(0, false, true)}>⇵ Lật dọc</button>
-      </div>
       <div className="row">
-        <label>Góc (°)</label>
-        <input type="number" value={angle} onChange={(e) => setAngle(+e.target.value)} />
-        <button onClick={() => onTransform(angle)}>Xoay</button>
+        <button onClick={() => patch({ w: item.srcW, h: item.srcH })}>Về cỡ gốc</button>
       </div>
+      {item.shape?.type === 'rect' && (
+        <div className="row">
+          <label>Bo góc (mm)</label>
+          <NumField value={item.shape.radius ?? 0} min={0} step={0.5} onCommit={(v) => reshape({ type: 'rect', radius: v })} />
+        </div>
+      )}
+      {item.shape?.type === 'polygon' && (
+        <div className="row">
+          <label>Số cạnh</label>
+          <NumField value={item.shape.sides ?? 6} min={3} step={1} onCommit={(v) => reshape({ type: 'polygon', sides: Math.round(v) })} />
+        </div>
+      )}
       {item.kind === 'bitmap' && (
         <>
           <h4>Dò viền ảnh → đường cắt</h4>

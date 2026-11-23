@@ -52,10 +52,20 @@ export interface Copies {
   gapY: number;
 }
 
+/** Thông số của hình vẽ trực tiếp, để còn chỉnh lại được (bo góc, số cạnh). */
+export interface ShapeSpec {
+  type: 'rect' | 'ellipse' | 'polygon' | 'line';
+  /** Bán kính bo góc của hình chữ nhật (mm) */
+  radius?: number;
+  /** Số cạnh của đa giác đều */
+  sides?: number;
+}
+
 export interface Item {
   id: string;
   name: string;
   kind: 'vector' | 'bitmap';
+  shape?: ShapeSpec;
   /** Đường vector theo tọa độ gốc (đơn vị mm), sẽ được co giãn về w×h */
   paths?: Polyline[];
   bitmap?: Bitmap;

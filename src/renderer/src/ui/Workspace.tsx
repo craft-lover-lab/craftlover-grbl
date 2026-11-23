@@ -1,15 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Bounds, Item, Layer, Polyline, Pt } from '../core/types';
-import { copyOffsets, isEmpty, itemBounds, placedPaths } from '../core/geometry';
+import { copyOffsets, isEmpty, itemBounds, placedPaths, pathsBounds } from '../core/geometry';
+import { regularPolygonBox, shapePaths } from '../core/shapes';
+import { hitItem, itemTouchesRect, moveItems, rotateItems, scaleItems, selBounds } from './designOps';
+
+export type Tool = 'select' | 'line' | 'rect' | 'ellipse' | 'polygon' | 'text';
+
+export type NewItem = Omit<Item, 'id' | 'copies'>;
 
 interface Props {
   bedW: number;
   bedH: number;
   items: Item[];
   layers: Layer[];
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  onChange: (id: string, patch: Partial<Item>) => void;
+  selectedIds: string[];
+  tool: Tool;
+  polygonSides: number;
+  activeLayer: Layer | undefined;
+  onSelect: (ids: string[]) => void;
+  /** Ghi lịch sử hoàn tác trước khi bắt đầu kéo */
+  onBeginEdit: () => void;
+  /** Cập nhật trực tiếp trong lúc kéo (không ghi lịch sử) */
+  onLive: (fn: (items: Item[]) => Item[]) => void;
+  /** Thay đổi một bước (có ghi lịch sử) */
+  onCommit: (fn: (items: Item[]) => Item[]) => void;
+  onCreate: (it: NewItem) => void;
+  onTextAt: (p: Pt) => void;
+  onToolDone: () => void;
   laserPos: Pt | null;
   jobFrame: Bounds | null;
   preview: { cut: Polyline[]; travel: Polyline[] } | null;
@@ -27,10 +44,30 @@ function getImg(url: string, redraw: () => void) {
   return im;
 }
 
+type Handle = 'tl' | 't' | 'tr' | 'r' | 'br' | 'b' | 'bl' | 'l';
+const HANDLES: Handle[] = ['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'];
+
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; ox: number; oy: number }
-  | { kind: 'move'; id: string; start: Pt; ix: number; iy: number }
-  | { kind: 'resize'; id: string; start: Pt; w: number; h: number; ratio: number };
+  | { kind: 'move'; base: Item[]; ids: Set<string>; start: Pt; moved: boolean }
+  | { kind: 'scale'; base: Item[]; ids: Set<string>; b: Bounds; h: Handle }
+  | { kind: 'rotate'; ids: Set<string>; c: Pt; a0: number }
+  | { kind: 'marquee'; start: Pt; additive: boolean }
+  | { kind: 'draw'; start: Pt };
+
+interface Overlay {
+  marquee?: { a: Pt; b: Pt };
+  ghost?: Polyline[];
+  rotate?: { c: Pt; angle: number; b: Bounds };
+}
+
+const snap = (v: number, on: boolean) => (on ? Math.round(v * 2) / 2 : v);
+
+function handlePos(b: Bounds, h: Handle): Pt {
+  const x = h.includes('l') ? b.minX : h.includes('r') ? b.maxX : (b.minX + b.maxX) / 2;
+  const y = h.startsWith('t') ? b.maxY : h.startsWith('b') ? b.minY : (b.minY + b.maxY) / 2;
+  return { x, y };
+}
 
 export function Workspace(p: Props) {
   const wrap = useRef<HTMLDivElement>(null);
@@ -39,7 +76,15 @@ export function Workspace(p: Props) {
   const [view, setView] = useState({ scale: 1.5, ox: 40, oy: 40 }); // ox/oy: vị trí màn hình của gốc (0,0) tính từ góc dưới-trái
   const drag = useRef<Drag | null>(null);
   const [tick, setTick] = useState(0);
+  const [overlay, setOverlay] = useState<Overlay>({});
+  const [pen, setPen] = useState<Pt[]>([]);
+  const [cursor, setCursor] = useState<Pt | null>(null);
+  const [space, setSpace] = useState(false);
   const userMoved = useRef(false);
+
+  const selSet = new Set(p.selectedIds);
+  const selItems = p.items.filter((i) => selSet.has(i.id));
+  const sb = selItems.length ? selBounds(selItems) : null;
 
   useEffect(() => {
     const el = wrap.current!;
@@ -57,10 +102,57 @@ export function Workspace(p: Props) {
     setView({ scale: s, ox: (size.w - p.bedW * s) / 2, oy: (size.h - p.bedH * s) / 2 });
   }, [size, p.bedW, p.bedH]);
 
-  // mm → màn hình
+  // Đổi công cụ → hủy nét bút đang vẽ dở
+  useEffect(() => setPen([]), [p.tool]);
+
   const toS = (x: number, y: number) => [view.ox + x * view.scale, size.h - (view.oy + y * view.scale)] as const;
   const toMM = (sx: number, sy: number): Pt => ({ x: (sx - view.ox) / view.scale, y: (size.h - sy - view.oy) / view.scale });
 
+  // ---------- Bút vẽ đường gấp khúc ----------
+  const finishPen = (close: boolean) => {
+    const pts = close && pen.length > 2 ? [...pen, { ...pen[0] }] : pen;
+    setPen([]);
+    if (pts.length < 2) return;
+    const b = pathsBounds([pts]);
+    const w = b.maxX - b.minX;
+    const h = b.maxY - b.minY;
+    p.onCreate({
+      name: close ? 'Đa giác' : 'Đường',
+      kind: 'vector',
+      shape: { type: 'line' },
+      paths: [pts.map((q) => ({ x: q.x - b.minX, y: q.y - b.minY }))],
+      srcW: w,
+      srcH: h,
+      w,
+      h,
+      x: b.minX,
+      y: b.minY,
+      layerId: p.activeLayer?.id ?? 'cut',
+    });
+    p.onToolDone();
+  };
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.code === 'Space' && !space) setSpace(true);
+      if (p.tool === 'line' && pen.length) {
+        if (e.key === 'Enter') finishPen(false);
+        else if (e.key === 'Escape') setPen([]);
+        else if (e.key === 'Backspace') setPen((a) => a.slice(0, -1));
+      }
+    };
+    const up = (e: KeyboardEvent) => e.code === 'Space' && setSpace(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  });
+
+  // ---------- Vẽ ----------
   useEffect(() => {
     const c = cv.current!;
     const dpr = window.devicePixelRatio || 1;
@@ -71,36 +163,45 @@ export function Workspace(p: Props) {
     ctx.fillStyle = '#15171b';
     ctx.fillRect(0, 0, size.w, size.h);
 
-    // Bàn máy & lưới
+    const line = (pl: Pt[]) =>
+      pl.forEach((q, i) => {
+        const [x, y] = toS(q.x, q.y);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+
+    // Bàn máy & lưới (lưới 1 mm khi phóng to đủ lớn)
     const [bx0, by0] = toS(0, 0);
     const [bx1, by1] = toS(p.bedW, p.bedH);
     ctx.fillStyle = '#f4f1ea';
     ctx.fillRect(bx0, by1, bx1 - bx0, by0 - by1);
     ctx.lineWidth = 1;
-    for (let g = 0; g <= Math.max(p.bedW, p.bedH); g += 10) {
-      ctx.strokeStyle = g % 50 === 0 ? '#cfc9bd' : '#e6e1d6';
+    const fine = view.scale > 6 ? 1 : 10;
+    for (let g = 0; g <= Math.max(p.bedW, p.bedH); g += fine) {
+      ctx.strokeStyle = g % 50 === 0 ? '#cfc9bd' : g % 10 === 0 ? '#e0dacd' : '#ece8de';
       if (g <= p.bedW) {
         const [x] = toS(g, 0);
         ctx.beginPath();
-        ctx.moveTo(x + 0.5, by0);
-        ctx.lineTo(x + 0.5, by1);
+        ctx.moveTo(Math.round(x) + 0.5, by0);
+        ctx.lineTo(Math.round(x) + 0.5, by1);
         ctx.stroke();
       }
       if (g <= p.bedH) {
         const [, y] = toS(0, g);
         ctx.beginPath();
-        ctx.moveTo(bx0, y + 0.5);
-        ctx.lineTo(bx1, y + 0.5);
+        ctx.moveTo(bx0, Math.round(y) + 0.5);
+        ctx.lineTo(bx1, Math.round(y) + 0.5);
         ctx.stroke();
       }
     }
     ctx.fillStyle = '#8b93a1';
     ctx.font = '11px system-ui';
-    for (let g = 0; g <= p.bedW; g += 50) {
+    const lab = view.scale > 3 ? 10 : 50;
+    for (let g = 0; g <= p.bedW; g += lab) {
       const [x] = toS(g, 0);
       ctx.fillText(String(g), x + 2, by0 + 13);
     }
-    for (let g = 50; g <= p.bedH; g += 50) {
+    for (let g = lab; g <= p.bedH; g += lab) {
       const [, y] = toS(0, g);
       ctx.fillText(String(g), bx0 - 26, y + 4);
     }
@@ -110,8 +211,7 @@ export function Workspace(p: Props) {
     for (const it of p.items) {
       const layer = layerOf(it.layerId);
       const color = layer?.color ?? '#000';
-      const dim = layer && !layer.enabled;
-      ctx.globalAlpha = dim ? 0.25 : 1;
+      ctx.globalAlpha = layer && !layer.enabled ? 0.25 : 1;
       for (const o of copyOffsets(it)) {
         if (it.kind === 'bitmap' && it.bitmap) {
           const im = getImg(it.bitmap.url, () => setTick((t) => t + 1));
@@ -120,15 +220,12 @@ export function Workspace(p: Props) {
         } else {
           ctx.strokeStyle = color;
           ctx.lineWidth = 1.2;
-          if (layer?.mode === 'fill') ctx.fillStyle = color + '55';
           ctx.beginPath();
-          for (const pl of placedPaths(it, o))
-            pl.forEach((q, i) => {
-              const [x, y] = toS(q.x, q.y);
-              if (i === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
-            });
-          if (layer?.mode === 'fill') ctx.fill('evenodd');
+          placedPaths(it, o).forEach(line);
+          if (layer?.mode === 'fill') {
+            ctx.fillStyle = color + '55';
+            ctx.fill('evenodd');
+          }
           ctx.stroke();
         }
       }
@@ -141,41 +238,126 @@ export function Workspace(p: Props) {
       ctx.strokeStyle = 'rgba(80,110,160,.6)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for (const pl of p.preview.travel)
-        pl.forEach((q, i) => {
-          const [x, y] = toS(q.x, q.y);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
+      p.preview.travel.forEach(line);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(220,40,40,.45)';
       ctx.beginPath();
-      for (const pl of p.preview.cut)
-        pl.forEach((q, i) => {
-          const [x, y] = toS(q.x, q.y);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
+      p.preview.cut.forEach(line);
       ctx.stroke();
     }
 
-    // Vùng chọn
-    const sel = p.items.find((i) => i.id === p.selectedId);
-    if (sel) {
-      const b = itemBounds(sel);
-      const [x0, y0] = toS(b.minX, b.maxY);
-      const [x1, y1] = toS(b.maxX, b.minY);
-      ctx.setLineDash([5, 4]);
+    // Đối tượng đang chọn: nét đứt xanh chồng lên
+    if (selItems.length) {
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = '#1a5fd6';
+      ctx.lineWidth = 1.5;
+      for (const it of selItems) {
+        ctx.beginPath();
+        if (it.kind === 'bitmap') {
+          const [x0, y0] = toS(it.x, it.y + it.h);
+          ctx.rect(x0, y0, it.w * view.scale, it.h * view.scale);
+        } else placedPaths(it, it).forEach(line);
+        ctx.stroke();
+        // Khung của các bản sao lưới
+        if (it.copies.cols * it.copies.rows > 1) {
+          const b = itemBounds(it);
+          const [x0, y0] = toS(b.minX, b.maxY);
+          const [x1, y1] = toS(b.maxX, b.minY);
+          ctx.strokeStyle = 'rgba(26,95,214,.35)';
+          ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+          ctx.strokeStyle = '#1a5fd6';
+        }
+      }
+      ctx.setLineDash([]);
+    }
+
+    // Khung chọn + tay nắm
+    if (sb && !overlay.rotate) {
+      const [x0, y0] = toS(sb.minX, sb.maxY);
+      const [x1, y1] = toS(sb.maxX, sb.minY);
       ctx.strokeStyle = '#2f7cf6';
       ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x0 - 0.5, y0 - 0.5, x1 - x0 + 1, y1 - y0 + 1);
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#fff';
+      for (const h of HANDLES) {
+        const q = handlePos(sb, h);
+        const [hx, hy] = toS(q.x, q.y);
+        ctx.fillRect(hx - 4, hy - 4, 8, 8);
+        ctx.strokeRect(hx - 4, hy - 4, 8, 8);
+      }
+      // Tay nắm xoay phía trên
+      const [rx, ry] = toS((sb.minX + sb.maxX) / 2, sb.maxY);
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx, ry - 22);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(rx, ry - 26, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#2f7cf6';
+      ctx.fillText(`${(sb.maxX - sb.minX).toFixed(1)} × ${(sb.maxY - sb.minY).toFixed(1)} mm`, x0, y1 + 14);
+    }
+
+    // Đang xoay: vẽ khung xoay theo góc
+    if (overlay.rotate) {
+      const { c, angle, b } = overlay.rotate;
+      const t = (angle * Math.PI) / 180;
+      const corners = [
+        { x: b.minX, y: b.minY },
+        { x: b.maxX, y: b.minY },
+        { x: b.maxX, y: b.maxY },
+        { x: b.minX, y: b.maxY },
+        { x: b.minX, y: b.minY },
+      ].map((q) => ({ x: c.x + (q.x - c.x) * Math.cos(t) - (q.y - c.y) * Math.sin(t), y: c.y + (q.x - c.x) * Math.sin(t) + (q.y - c.y) * Math.cos(t) }));
+      ctx.strokeStyle = '#2f7cf6';
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      line(corners);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const [cx, cy] = toS(c.x, c.y);
+      ctx.fillStyle = '#2f7cf6';
+      ctx.fillText(`${angle.toFixed(1)}°`, cx + 8, cy - 8);
+    }
+
+    // Vùng chọn kéo chuột: trái→phải = chọn trọn, phải→trái = chọn chạm
+    if (overlay.marquee) {
+      const { a, b } = overlay.marquee;
+      const [x0, y0] = toS(a.x, a.y);
+      const [x1, y1] = toS(b.x, b.y);
+      const crossing = b.x < a.x;
+      ctx.fillStyle = crossing ? 'rgba(24,160,88,.08)' : 'rgba(47,124,246,.08)';
+      ctx.strokeStyle = crossing ? '#18a058' : '#2f7cf6';
+      ctx.setLineDash(crossing ? [5, 4] : []);
+      ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
       ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
       ctx.setLineDash([]);
-      const [hx, hy] = toS(sel.x + sel.w, sel.y + sel.h);
-      ctx.fillStyle = '#2f7cf6';
-      ctx.fillRect(hx - 5, hy - 5, 10, 10);
-      ctx.fillStyle = '#2f7cf6';
-      ctx.fillText(`${sel.w.toFixed(1)} × ${sel.h.toFixed(1)} mm`, x0, y0 - 6);
+    }
+
+    // Hình đang vẽ / nét bút
+    const ghostColor = p.activeLayer?.color ?? '#e5243b';
+    if (overlay.ghost) {
+      ctx.strokeStyle = ghostColor;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      overlay.ghost.forEach(line);
+      ctx.stroke();
+    }
+    if (pen.length) {
+      ctx.strokeStyle = ghostColor;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      line(cursor ? [...pen, cursor] : pen);
+      ctx.stroke();
+      ctx.fillStyle = ghostColor;
+      for (const q of pen) {
+        const [x, y] = toS(q.x, q.y);
+        ctx.fillRect(x - 3, y - 3, 6, 6);
+      }
     }
 
     // Khung công việc (khi chạy theo vị trí hiện tại)
@@ -212,88 +394,277 @@ export function Workspace(p: Props) {
       ctx.lineTo(lx, ly + 12);
       ctx.stroke();
     }
-  }, [p, view, size, tick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.items, p.layers, p.selectedIds, p.preview, p.jobFrame, p.laserPos, p.bedW, p.bedH, view, size, tick, overlay, pen, cursor && p.tool === 'line' ? cursor : null]);
 
-  const hit = (m: Pt) => {
+  // ---------- Chuột ----------
+  const local = (e: React.MouseEvent) => {
+    const r = cv.current!.getBoundingClientRect();
+    return { sx: e.clientX - r.left, sy: e.clientY - r.top };
+  };
+  const tolMM = () => 5 / view.scale;
+
+  const topHit = (m: Pt) => {
     for (let i = p.items.length - 1; i >= 0; i--) {
-      const b = itemBounds(p.items[i]);
-      if (m.x >= b.minX && m.x <= b.maxX && m.y >= b.minY && m.y <= b.maxY) return p.items[i];
+      const it = p.items[i];
+      const filled = p.layers.find((l) => l.id === it.layerId)?.mode === 'fill';
+      if (hitItem(it, m, tolMM(), filled)) return it;
     }
     return null;
   };
 
+  /** Điểm vẽ: bắt dính lưới 0.5 mm (giữ Alt để tắt); Shift giữ góc 15° với điểm trước. */
+  const drawPt = (m: Pt, e: React.MouseEvent, prev?: Pt): Pt => {
+    if (prev && e.shiftKey) {
+      const d = Math.hypot(m.x - prev.x, m.y - prev.y);
+      const a = Math.round(Math.atan2(m.y - prev.y, m.x - prev.x) / (Math.PI / 12)) * (Math.PI / 12);
+      return { x: prev.x + d * Math.cos(a), y: prev.y + d * Math.sin(a) };
+    }
+    return { x: snap(m.x, !e.altKey), y: snap(m.y, !e.altKey) };
+  };
+
+  const shapeBox = (a: Pt, b: Pt, square: boolean, fromCenter: boolean) => {
+    if (p.tool === 'polygon') {
+      // Đa giác đều: tâm tại điểm bắt đầu, bán kính tới con trỏ
+      const pb = regularPolygonBox(p.polygonSides, Math.hypot(b.x - a.x, b.y - a.y));
+      return { x: a.x - pb.cx, y: a.y - pb.cy, w: pb.w, h: pb.h };
+    }
+    let w = Math.abs(b.x - a.x);
+    let h = Math.abs(b.y - a.y);
+    if (square) w = h = Math.max(w, h);
+    if (fromCenter) return { x: a.x - w, y: a.y - h, w: 2 * w, h: 2 * h };
+    return { x: b.x < a.x ? a.x - w : a.x, y: b.y < a.y ? a.y - h : a.y, w, h };
+  };
+
   const onDown = (e: React.MouseEvent) => {
-    const r = cv.current!.getBoundingClientRect();
-    const sx = e.clientX - r.left;
-    const sy = e.clientY - r.top;
+    const { sx, sy } = local(e);
     const m = toMM(sx, sy);
-    const sel = p.items.find((i) => i.id === p.selectedId);
-    if (e.button === 0 && sel) {
-      const [hx, hy] = toS(sel.x + sel.w, sel.y + sel.h);
-      if (Math.abs(sx - hx) < 8 && Math.abs(sy - hy) < 8) {
-        drag.current = { kind: 'resize', id: sel.id, start: m, w: sel.w, h: sel.h, ratio: sel.h / sel.w };
+    if (e.button === 1 || e.button === 2 || space) {
+      drag.current = { kind: 'pan', sx, sy, ox: view.ox, oy: view.oy };
+      return;
+    }
+    if (e.button !== 0) return;
+
+    if (p.tool === 'text') {
+      p.onTextAt(drawPt(m, e));
+      return;
+    }
+    if (p.tool === 'line') {
+      const q = drawPt(m, e, pen[pen.length - 1]);
+      if (pen.length > 2) {
+        const [fx, fy] = toS(pen[0].x, pen[0].y);
+        if (Math.hypot(sx - fx, sy - fy) < 8) return finishPen(true);
+      }
+      if (e.detail >= 2) return finishPen(false); // nhấp đúp để kết thúc
+      setPen((a) => [...a, q]);
+      return;
+    }
+    if (p.tool !== 'select') {
+      drag.current = { kind: 'draw', start: drawPt(m, e) };
+      return;
+    }
+
+    // Tay nắm của khung chọn
+    if (sb) {
+      const [rx, ry] = toS((sb.minX + sb.maxX) / 2, sb.maxY);
+      if (Math.hypot(sx - rx, sy - (ry - 26)) < 8) {
+        p.onBeginEdit();
+        const c = { x: (sb.minX + sb.maxX) / 2, y: (sb.minY + sb.maxY) / 2 };
+        drag.current = { kind: 'rotate', ids: selSet, c, a0: Math.atan2(m.y - c.y, m.x - c.x) };
+        setOverlay({ rotate: { c, angle: 0, b: sb } });
         return;
       }
+      for (const h of HANDLES) {
+        const q = handlePos(sb, h);
+        const [hx, hy] = toS(q.x, q.y);
+        if (Math.abs(sx - hx) < 7 && Math.abs(sy - hy) < 7) {
+          p.onBeginEdit();
+          drag.current = { kind: 'scale', base: p.items, ids: selSet, b: sb, h };
+          return;
+        }
+      }
     }
-    const h = e.button === 0 ? hit(m) : null;
-    if (h) {
-      p.onSelect(h.id);
-      drag.current = { kind: 'move', id: h.id, start: m, ix: h.x, iy: h.y };
-    } else {
-      if (e.button === 0) p.onSelect(null);
-      drag.current = { kind: 'pan', sx, sy, ox: view.ox, oy: view.oy };
+
+    const hit = topHit(m);
+    if (hit) {
+      if (e.shiftKey || e.ctrlKey) {
+        // Shift/Ctrl + nhấp: thêm/bớt khỏi vùng chọn
+        p.onSelect(selSet.has(hit.id) ? p.selectedIds.filter((i) => i !== hit.id) : [...p.selectedIds, hit.id]);
+        return;
+      }
+      const ids = selSet.has(hit.id) ? selSet : new Set([hit.id]);
+      if (!selSet.has(hit.id)) p.onSelect([hit.id]);
+      drag.current = { kind: 'move', base: p.items, ids, start: m, moved: false };
+      return;
     }
+    if (sb && m.x >= sb.minX && m.x <= sb.maxX && m.y >= sb.minY && m.y <= sb.maxY && !e.shiftKey) {
+      drag.current = { kind: 'move', base: p.items, ids: selSet, start: m, moved: false };
+      return;
+    }
+    drag.current = { kind: 'marquee', start: m, additive: e.shiftKey || e.ctrlKey };
   };
 
   const onMove = (e: React.MouseEvent) => {
+    const { sx, sy } = local(e);
+    const m = toMM(sx, sy);
+    setCursor(p.tool === 'line' && pen.length ? drawPt(m, e, pen[pen.length - 1]) : m);
     const d = drag.current;
     if (!d) return;
-    const r = cv.current!.getBoundingClientRect();
-    const sx = e.clientX - r.left;
-    const sy = e.clientY - r.top;
-    if (d.kind === 'pan') (userMoved.current = true), setView((v) => ({ ...v, ox: d.ox + (sx - d.sx), oy: d.oy - (sy - d.sy) }));
-    else {
-      const m = toMM(sx, sy);
-      if (d.kind === 'move') {
-        let x = d.ix + m.x - d.start.x;
-        let y = d.iy + m.y - d.start.y;
-        if (!e.altKey) {
-          // Bắt dính lưới 0.5 mm
-          x = Math.round(x * 2) / 2;
-          y = Math.round(y * 2) / 2;
+    switch (d.kind) {
+      case 'pan':
+        userMoved.current = true;
+        setView((v) => ({ ...v, ox: d.ox + (sx - d.sx), oy: d.oy - (sy - d.sy) }));
+        break;
+      case 'move': {
+        const dx = snap(m.x - d.start.x, !e.altKey);
+        const dy = snap(m.y - d.start.y, !e.altKey);
+        if (!d.moved && Math.hypot(dx, dy) * view.scale < 3) return;
+        if (!d.moved) {
+          d.moved = true;
+          p.onBeginEdit();
         }
-        p.onChange(d.id, { x, y });
-      } else {
-        const w = Math.max(1, d.w + m.x - d.start.x);
-        p.onChange(d.id, { w, h: e.shiftKey ? Math.max(1, d.h + m.y - d.start.y) : w * d.ratio });
+        // Shift: chỉ di chuyển theo một trục
+        const [mx, my] = e.shiftKey ? (Math.abs(dx) > Math.abs(dy) ? [dx, 0] : [0, dy]) : [dx, dy];
+        p.onLive(() => moveItems(d.base, d.ids, mx, my));
+        break;
       }
+      case 'scale': {
+        const { b, h } = d;
+        const opp = handlePos(b, ({ tl: 'br', t: 'b', tr: 'bl', r: 'l', br: 'tl', b: 't', bl: 'tr', l: 'r' } as const)[h]);
+        const w0 = b.maxX - b.minX || 1;
+        const h0 = b.maxY - b.minY || 1;
+        let sxk = h === 't' || h === 'b' ? 1 : Math.abs(m.x - opp.x) / w0;
+        let syk = h === 'l' || h === 'r' ? 1 : Math.abs(m.y - opp.y) / h0;
+        // Góc: giữ tỉ lệ (Shift để kéo giãn tự do)
+        if (h.length === 2 && !e.shiftKey) sxk = syk = Math.max(sxk, syk);
+        sxk = Math.max(0.01, sxk);
+        syk = Math.max(0.01, syk);
+        p.onLive(() => scaleItems(d.base, d.ids, opp, sxk, syk));
+        break;
+      }
+      case 'rotate': {
+        let ang = ((Math.atan2(m.y - d.c.y, m.x - d.c.x) - d.a0) * 180) / Math.PI;
+        ang = ((ang + 540) % 360) - 180;
+        if (e.shiftKey) ang = Math.round(ang / 15) * 15;
+        setOverlay((o) => (o.rotate ? { rotate: { ...o.rotate, angle: ang } } : o));
+        break;
+      }
+      case 'marquee':
+        setOverlay({ marquee: { a: d.start, b: m } });
+        break;
+      case 'draw': {
+        const q = drawPt(m, e);
+        const poly = p.tool === 'polygon';
+        const box = shapeBox(d.start, q, e.shiftKey || poly, poly || e.ctrlKey);
+        const spec = p.tool === 'rect' ? { type: 'rect' as const } : poly ? { type: 'polygon' as const, sides: p.polygonSides } : { type: 'ellipse' as const };
+        const ps = shapePaths(spec, box.w, box.h) ?? [];
+        setOverlay({ ghost: ps.map((pl) => pl.map((z) => ({ x: z.x + box.x, y: z.y + box.y }))) });
+        break;
+      }
+    }
+  };
+
+  const onUp = (e: React.MouseEvent) => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d) return;
+    const { sx, sy } = local(e);
+    const m = toMM(sx, sy);
+    if (d.kind === 'rotate') {
+      const ang = overlay.rotate?.angle ?? 0;
+      setOverlay({});
+      if (Math.abs(ang) > 0.01) p.onLive((items) => rotateItems(items, d.ids, ang, d.c));
+    } else if (d.kind === 'marquee') {
+      setOverlay({});
+      const r = { minX: Math.min(d.start.x, m.x), maxX: Math.max(d.start.x, m.x), minY: Math.min(d.start.y, m.y), maxY: Math.max(d.start.y, m.y) };
+      if ((r.maxX - r.minX) * view.scale < 3 && (r.maxY - r.minY) * view.scale < 3) {
+        if (!d.additive) p.onSelect([]);
+        return;
+      }
+      const crossing = m.x < d.start.x;
+      const hits = p.items
+        .filter((it) =>
+          crossing ? itemTouchesRect(it, r) : it.x >= r.minX && it.x + it.w <= r.maxX && it.y >= r.minY && it.y + it.h <= r.maxY,
+        )
+        .map((i) => i.id);
+      p.onSelect(d.additive ? [...new Set([...p.selectedIds, ...hits])] : hits);
+    } else if (d.kind === 'draw') {
+      setOverlay({});
+      const q = drawPt(m, e);
+      const poly = p.tool === 'polygon';
+      const box = shapeBox(d.start, q, e.shiftKey || poly, poly || e.ctrlKey);
+      if (box.w < 0.3 || box.h < 0.3) return;
+      const spec = p.tool === 'rect' ? { type: 'rect' as const, radius: 0 } : poly ? { type: 'polygon' as const, sides: p.polygonSides } : { type: 'ellipse' as const };
+      const names = { rect: 'Hình chữ nhật', ellipse: 'Elip', polygon: `Đa giác ${p.polygonSides} cạnh` } as const;
+      p.onCreate({
+        name: names[spec.type],
+        kind: 'vector',
+        shape: spec,
+        paths: shapePaths(spec, box.w, box.h)!,
+        srcW: box.w,
+        srcH: box.h,
+        w: box.w,
+        h: box.h,
+        x: box.x,
+        y: box.y,
+        layerId: p.activeLayer?.id ?? 'cut',
+      });
+      p.onToolDone();
     }
   };
 
   const onWheel = (e: React.WheelEvent) => {
-    const r = cv.current!.getBoundingClientRect();
-    const sx = e.clientX - r.left;
-    const sy = e.clientY - r.top;
+    const { sx, sy } = local(e);
     const m = toMM(sx, sy);
     const k = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     userMoved.current = true;
-    const scale = Math.min(60, Math.max(0.3, view.scale * k));
+    const scale = Math.min(80, Math.max(0.3, view.scale * k));
     setView({ scale, ox: sx - m.x * scale, oy: size.h - sy - m.y * scale });
+  };
+
+  const fit = () => {
+    userMoved.current = false;
+    const s = Math.min((size.w - 60) / p.bedW, (size.h - 60) / p.bedH);
+    setView({ scale: s, ox: (size.w - p.bedW * s) / 2, oy: (size.h - p.bedH * s) / 2 });
+  };
+
+  // Móc kiểm thử: đổi tọa độ mm → tọa độ màn hình để giả lập chuột
+  (window as any).__wsClient = (x: number, y: number) => {
+    const [sx, sy] = toS(x, y);
+    const r = cv.current!.getBoundingClientRect();
+    return [r.left + sx, r.top + sy];
+  };
+
+  const cursorStyle = space || drag.current?.kind === 'pan' ? 'grab' : p.tool === 'select' ? 'default' : p.tool === 'text' ? 'text' : 'crosshair';
+  const hints: Record<Tool, string> = {
+    select: 'Nhấp: chọn · Shift/Ctrl+nhấp: thêm bớt · Kéo nền trái→phải: chọn trọn, phải→trái: chọn chạm · Chuột phải/giữa hoặc Space+kéo: cuộn',
+    line: 'Nhấp để thêm điểm · Nhấp đúp hoặc Enter: kết thúc · Nhấp điểm đầu: khép kín · Shift: góc 15° · Backspace: xóa điểm · Esc: hủy',
+    rect: 'Kéo để vẽ · Shift: hình vuông · Ctrl: vẽ từ tâm · Alt: tắt bắt dính lưới',
+    ellipse: 'Kéo để vẽ · Shift: hình tròn · Ctrl: vẽ từ tâm · Alt: tắt bắt dính lưới',
+    polygon: 'Kéo từ tâm ra để vẽ đa giác đều',
+    text: 'Nhấp vào vị trí muốn đặt chữ',
   };
 
   return (
     <div ref={wrap} className="workspace">
       <canvas
         ref={cv}
-        style={{ width: size.w, height: size.h }}
+        style={{ width: size.w, height: size.h, cursor: cursorStyle }}
         onMouseDown={onDown}
         onMouseMove={onMove}
-        onMouseUp={() => (drag.current = null)}
-        onMouseLeave={() => (drag.current = null)}
+        onMouseUp={onUp}
+        onMouseLeave={(e) => {
+          if (drag.current) onUp(e);
+          setCursor(null);
+        }}
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
       />
-      <div className="ws-hint">Lăn chuột: phóng to · Kéo nền: di chuyển · Kéo ô vuông xanh: đổi cỡ (Shift: tự do) · Alt: tắt bắt dính</div>
+      <div className="ws-hint">{hints[p.tool]}</div>
+      <div className="ws-coords">
+        {cursor ? `X ${cursor.x.toFixed(2)}  Y ${cursor.y.toFixed(2)} mm` : ''}
+        <button className="tiny" onClick={fit} title="Xem toàn bộ bàn máy">⤢ Vừa khung</button>
+      </div>
     </div>
   );
 }

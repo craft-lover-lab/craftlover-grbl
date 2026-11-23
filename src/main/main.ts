@@ -24,6 +24,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Chế độ chụp tự động: vẫn vẽ lại khi cửa sổ bị che
+      backgroundThrottling: !process.env.LASER_SNAPSHOT,
     },
   });
   win.setMenuBarVisibility(false);
@@ -53,7 +55,9 @@ function createWindow() {
           if (process.env.LASER_GCODE_OUT)
             await writeFile(process.env.LASER_GCODE_OUT, await win!.webContents.executeJavaScript('window.__laserGcode()'));
         }
-        const img = await win!.webContents.capturePage();
+        win!.webContents.invalidate();
+        await new Promise((r) => setTimeout(r, 300));
+        const img = await win!.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
         await writeFile(snap, img.toPNG());
         app.quit();
       }, 2500),

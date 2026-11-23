@@ -10,14 +10,14 @@ export interface TextSpec {
   layerId: string;
 }
 
-export function TextDialog({ layers, onClose, onOk }: { layers: Layer[]; onClose: () => void; onOk: (t: TextSpec) => Promise<void> | void }) {
+export function TextDialog({ layers, defaultLayerId, onClose, onOk }: { layers: Layer[]; defaultLayerId?: string; onClose: () => void; onOk: (t: TextSpec) => Promise<void> | void }) {
   const [fonts, setFonts] = useState<{ name: string; file: string }[]>([]);
   const [font, setFont] = useState(() => localStorage.getItem('font') ?? '');
   const [text, setText] = useState('Xin chào');
   const [size, setSize] = useState(20);
   const [align, setAlign] = useState<TextAlign>('center');
   const vec = layers.filter((l) => l.mode !== 'image');
-  const [layerId, setLayerId] = useState(vec.find((l) => l.mode === 'fill')?.id ?? vec[0]?.id ?? '');
+  const [layerId, setLayerId] = useState(defaultLayerId ?? vec.find((l) => l.mode === 'fill')?.id ?? vec[0]?.id ?? '');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {

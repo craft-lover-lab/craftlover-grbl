@@ -41,6 +41,26 @@ npm run dev      # chế độ phát triển (tự tải lại giao diện)
 | **Lưu / mở dự án** `.lzr` | Lưu đối tượng (kèm ảnh) và các lớp gia công. |
 | Nhân đôi, phím tắt | Ctrl+D nhân đôi, Delete xóa, phím mũi tên dịch 1 mm (giữ Shift: 10 mm). |
 
+## Trình thiết kế trực tiếp
+
+Có thể vẽ và chỉnh sửa trực tiếp trên bàn máy, không cần phần mềm thiết kế riêng.
+
+| Phím | Công cụ / thao tác |
+|---|---|
+| V | Chọn. Nhấp để chọn; Shift/Ctrl+nhấp để thêm hoặc bớt. Kéo nền từ trái sang phải: chọn các đối tượng nằm trọn trong vùng; từ phải sang trái: chọn mọi đối tượng chạm vào vùng. |
+| L | Bút vẽ đường gấp khúc. Nhấp để thêm điểm, nhấp đúp hoặc Enter để kết thúc, nhấp lại điểm đầu để khép kín. Shift: góc 15°. |
+| R / E / P | Hình chữ nhật, elip, đa giác đều. Shift: hình vuông / hình tròn. Ctrl: vẽ từ tâm. |
+| T | Chữ: nhấp vào vị trí muốn đặt chữ. |
+| Ctrl+Z / Ctrl+Y | Hoàn tác / làm lại |
+| Ctrl+C / X / V / D / A | Sao chép, cắt, dán, nhân đôi, chọn tất cả |
+| Delete, mũi tên | Xóa; dịch 1 mm (giữ Shift: 10 mm) |
+| Space+kéo, chuột phải/giữa | Cuộn vùng làm việc |
+
+- **Tay nắm:** 8 tay nắm để co giãn (ở góc thì giữ tỉ lệ, giữ Shift để kéo giãn tự do), và 1 tay nắm tròn phía trên để xoay (giữ Shift để xoay theo bước 15°).
+- **Thanh thuộc tính:** chọn 1 trong 9 điểm tham chiếu, nhập X, Y, rộng, cao, góc xoay; lật đối tượng; căn trái/phải/trên/dưới/giữa và chia đều. Khi chỉ chọn 1 đối tượng, các nút căn sẽ căn theo bàn máy.
+- **Bảng màu:** chọn đối tượng rồi nhấp một màu để chuyển chúng sang lớp màu đó. Nếu lớp chưa có, phần mềm tự tạo. Không chọn gì mà nhấp màu: màu đó được dùng cho các hình vẽ tiếp theo.
+- **Hình đã vẽ:** hình chữ nhật chỉnh được bo góc, đa giác chỉnh được số cạnh, trong bảng Đối tượng.
+
 ### Ý tưởng tiếp theo
 
 - Mô phỏng từng bước theo thời gian.
