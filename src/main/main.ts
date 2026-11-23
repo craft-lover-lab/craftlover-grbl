@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { GrblConnection } from './grbl';
+import { listPorts, openSerial } from './serialTransport';
 import { epsToPdf, listFonts, readFont, type FontEntry } from './system';
 
 let win: BrowserWindow | null = null;
@@ -9,11 +10,14 @@ let win: BrowserWindow | null = null;
 // LASER_PROFILE=<folder>: run with a separate settings profile (clean first-run state for tests/screenshots)
 if (process.env.LASER_PROFILE) app.setPath('userData', path.resolve(process.env.LASER_PROFILE));
 
-const grbl = new GrblConnection({
-  onLine: (line) => win?.webContents.send('grbl:line', line),
-  onProgress: (p) => win?.webContents.send('grbl:progress', p),
-  onClose: () => win?.webContents.send('grbl:closed'),
-});
+const grbl = new GrblConnection(
+  {
+    onLine: (line) => win?.webContents.send('grbl:line', line),
+    onProgress: (p) => win?.webContents.send('grbl:progress', p),
+    onClose: () => win?.webContents.send('grbl:closed'),
+  },
+  { open: openSerial },
+);
 
 function createWindow() {
   win = new BrowserWindow({
@@ -68,7 +72,7 @@ function createWindow() {
   }
 }
 
-ipcMain.handle('serial:list', () => GrblConnection.list());
+ipcMain.handle('serial:list', () => listPorts());
 ipcMain.handle('serial:open', (_e, p: string, baud: number) => grbl.open(p, baud));
 ipcMain.handle('serial:close', () => grbl.close());
 ipcMain.handle('grbl:send', (_e, lines: string[]) => grbl.send(lines));
@@ -77,6 +81,14 @@ ipcMain.handle('grbl:run', (_e, lines: string[]) => grbl.runJob(lines));
 ipcMain.handle('grbl:pause', () => grbl.pause());
 ipcMain.handle('grbl:resume', () => grbl.resume());
 ipcMain.handle('grbl:abort', () => grbl.abort());
+// Pre-start check: current machine state and fresh $-settings (refused while a job runs)
+ipcMain.handle('grbl:check', async () => {
+  // Ask for a fresh status report so the state is current
+  grbl.realtime('?');
+  const settings = await grbl.readSettings();
+  await new Promise((r) => setTimeout(r, 300));
+  return { state: grbl.machineState, settings, jobActive: grbl.jobActive };
+});
 
 // Native dialog labels follow the language chosen in the UI
 const DIALOG_TEXT = {

@@ -81,8 +81,8 @@ export const en = {
 
   // Job
   'job.empty': 'There are no objects yet',
-  'job.outOfBed': 'The job area ({x0}, {y0}) → ({x1}, {y1}) goes outside the {w}×{h} mm bed. Continue anyway?',
-  'job.confirmStart': 'Start running {n} lines (about {time})?\nWear laser safety glasses and check the material.',
+  'job.outOfBed': 'The toolpath ({x0}, {y0}) → ({x1}, {y1}) — including overscan and travel moves — goes outside the {w}×{h} mm bed. Continue anyway?',
+  'job.confirmStart': 'Start running {n} lines (about {time})?\nWear laser safety glasses and check the material.\nSTOP is a software stop — keep the machine\'s power switch / emergency stop within reach.',
   'frame.empty': 'There are no objects to frame',
 
   // Connection panel
@@ -110,8 +110,7 @@ export const en = {
   'jog.unlockTip': 'Clear an alarm lock',
   'jog.fire': 'Fire 1%',
   'jog.fireOff': 'Laser off',
-  'jog.fireTip': 'Turn on a 1% beam for positioning — do not leave it in one spot',
-
+  'jog.fireTip': 'Turn on a 1% beam for positioning — it switches off by itself after 10 seconds',
   // Job panel
   'jobp.title': 'Job',
   'jobp.absolute': 'Work origin (position on the bed)',
@@ -227,6 +226,29 @@ export const en = {
   'shape.rect': 'Rectangle',
   'shape.ellipse': 'Ellipse',
   'shape.polygon': '{n}-sided polygon',
+
+  // Job state and pre-start checks
+  'job.busy': 'A job is running — manual commands are locked until it ends',
+  'job.done': 'Job finished',
+  'job.failed': 'Job stopped: GRBL rejected a line ({detail}). The machine was held and reset.',
+  'job.reason.stopped': 'Job stopped by the user',
+  'job.reason.alarm': 'Job aborted: the machine raised an alarm',
+  'job.reason.reset': 'Job aborted: the controller restarted. Do not resume — check the position and run the job again.',
+  'job.reason.disconnected': 'Job aborted: the connection to the machine was lost',
+  'job.reason.error': 'Job stopped on a G-code error',
+  'job.state.idle': 'Idle',
+  'job.state.running': 'Running',
+  'job.state.paused': 'Paused',
+  'job.state.completing': 'Finishing moves',
+  'job.state.done': 'Done',
+  'job.state.aborted': 'Aborted',
+  'job.state.failed': 'Failed',
+  'check.title': 'The machine is not ready:',
+  'check.failed': 'Could not read the machine state: {msg}',
+  'check.alarm': 'The machine is in ALARM state — click "Unlock $X" (or Home) first',
+  'check.notIdle': 'The machine is not idle (state: {state}) — wait until it stops',
+  'check.laserMode': 'Laser mode is off ($32={value}). Send $32=1, otherwise the laser stays on during travel moves.',
+  'check.sMax': 'S max does not match: GRBL $30={grbl}, app S max={app}. Make them equal in the Job panel or with $30=…',
 
   // Layers order, material library, test grid
   'tb.library': 'Materials',

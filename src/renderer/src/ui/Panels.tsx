@@ -9,7 +9,7 @@ import { NumField } from './DesignBars';
 type G = ReturnType<typeof useGrbl>;
 
 // ---------- Machine connection + console ----------
-export function ConnectionPanel({ g, machine, setMachine }: { g: G; machine: MachineProfile; setMachine: (m: MachineProfile) => void }) {
+export function ConnectionPanel({ g, machine, setMachine, locked }: { g: G; machine: MachineProfile; setMachine: (m: MachineProfile) => void; locked: boolean }) {
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [port, setPort] = useState('');
   const [cmd, setCmd] = useState('');
@@ -45,7 +45,9 @@ export function ConnectionPanel({ g, machine, setMachine }: { g: G; machine: Mac
           ))}
         </select>
         {g.connected ? (
-          <button onClick={g.disconnect}>{t('conn.disconnect')}</button>
+          <button onClick={g.disconnect} disabled={locked}>
+            {t('conn.disconnect')}
+          </button>
         ) : (
           <button className="go" disabled={!port} onClick={() => g.connect(port, machine.baud).catch((e) => alert(t('conn.openFailed', { msg: errorText(e) })))}>
             {t('conn.connect')}
@@ -70,27 +72,42 @@ export function ConnectionPanel({ g, machine, setMachine }: { g: G; machine: Mac
           setCmd('');
         }}
       >
-        <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={t('conn.cmdPlaceholder')} disabled={!g.connected} />
-        <button disabled={!g.connected}>{t('conn.send')}</button>
+        {/* Locked while a job runs: manual commands must never be mixed into a job */}
+        <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={locked ? t('job.busy') : t('conn.cmdPlaceholder')} disabled={!g.connected || locked} />
+        <button disabled={!g.connected || locked}>{t('conn.send')}</button>
       </form>
     </section>
   );
 }
 
 // ---------- Jogging, origin, homing ----------
+const FIRE_SECONDS = 10;
 export function JogPanel({ g, jog, disabled }: { g: G; jog: (dx: number, dy: number, step: number, feed: number) => void; disabled: boolean }) {
   const [step, setStep] = useState(10);
   const [feed, setFeed] = useState(3000);
-  const [firing, setFiring] = useState(false);
-  const fire = async () => {
-    if (firing) {
-      await g.send(['M5 S0']);
-      setFiring(false);
-    } else {
-      // Very weak (1%) beam to see the position — never leave it in one spot
-      await g.send(['M3 S10', 'G1 F1000']);
-      setFiring(true);
+  // Fire 1%: a very weak beam to see the position. It switches itself off after
+  // FIRE_SECONDS so it can never be left burning in one spot.
+  const [fireLeft, setFireLeft] = useState(0);
+  const firing = fireLeft > 0;
+  const stopFire = () => {
+    setFireLeft(0);
+    if (g.connected) g.send(['M5 S0']);
+  };
+  useEffect(() => {
+    if (!firing) return;
+    if (disabled) {
+      // A job started or the connection dropped: the job itself starts with M5
+      setFireLeft(0);
+      return;
     }
+    const id = setTimeout(() => (fireLeft <= 1 ? stopFire() : setFireLeft(fireLeft - 1)), 1000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fireLeft, disabled]);
+  const fire = async () => {
+    if (firing) return stopFire();
+    await g.send(['M3 S10', 'G1 F1000']);
+    setFireLeft(FIRE_SECONDS);
   };
   return (
     <section className="panel">
@@ -129,7 +146,7 @@ export function JogPanel({ g, jog, disabled }: { g: G; jog: (dx: number, dy: num
           {t('jog.unlock')}
         </button>
         <button disabled={disabled} className={firing ? 'warn' : ''} onClick={fire} title={t('jog.fireTip')}>
-          {firing ? `🔴 ${t('jog.fireOff')}` : `🔆 ${t('jog.fire')}`}
+          {firing ? `🔴 ${t('jog.fireOff')} (${fireLeft}s)` : `🔆 ${t('jog.fire')}`}
         </button>
       </div>
     </section>

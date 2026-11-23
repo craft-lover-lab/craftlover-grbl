@@ -1,6 +1,6 @@
 import type { Bounds, Item, JobOptions, Layer, MachineProfile, Polyline, Pt } from './types';
 import { anchorPoint, copyOffsets, isEmpty, itemsBounds, optimizeOrder, placedPaths } from './geometry';
-import { rasterize } from './raster';
+import { rasterize, type Raster } from './raster';
 
 const f = (n: number) => {
   const s = n.toFixed(3);
@@ -47,13 +47,23 @@ export function orderedWork(items: Item[], layers: Layer[]) {
 export interface GcodeResult {
   lines: string[];
   bounds: Bounds;
+  /** Every X/Y the head is commanded to (overscan, travel and the return move included) */
+  motion: Bounds;
   /** Estimated run time (seconds), ignoring acceleration */
   seconds: number;
   /** Toolpaths for the preview (offset already applied) */
   preview: { cut: Polyline[]; travel: Polyline[] };
 }
 
-export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, opt: JobOptions): GcodeResult {
+export function generateJob(
+  items: Item[],
+  layers: Layer[],
+  m: MachineProfile,
+  opt: JobOptions,
+  /** Injectable for tests (the real rasterizer needs a browser canvas) */
+  deps: { rasterize?: typeof rasterize } = {},
+): GcodeResult {
+  const raster = deps.rasterize ?? rasterize;
   const off = jobOffset(items, opt);
   const out: string[] = [];
   const cut: Polyline[] = [];
@@ -100,7 +110,7 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
         }
       } else {
         for (const it of its) {
-          const r = rasterize(it, layer);
+          const r = raster(it, layer);
           for (const o of copyOffsets(it)) rasterGcode(r, { x: o.x + off.x, y: o.y + off.y }, layer);
         }
       }
@@ -108,7 +118,7 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
     out.push('M5 S0');
   }
 
-  function rasterGcode(r: ReturnType<typeof rasterize>, o: Pt, layer: Layer) {
+  function rasterGcode(r: Raster, o: Pt, layer: Layer) {
     let dirLTR = true;
     let firstF = true;
     for (let row = r.rows - 1; row >= 0; row--) {
@@ -126,8 +136,10 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
       const xL = o.x + a * r.px;
       const xR = o.x + (b + 1) * r.px;
       const ltr = layer.bidirectional ? dirLTR : true;
-      const ov = layer.overscan;
-      g0({ x: ltr ? xL - ov : xR + ov, y });
+      // Overscan is shortened at the bed edges so the head never travels past X = 0 / X = bed width
+      const ovL = Math.max(0, Math.min(layer.overscan, xL));
+      const ovR = Math.max(0, Math.min(layer.overscan, m.bedW - xR));
+      g0({ x: ltr ? xL - ovL : xR + ovR, y });
       out.push(`G1 X${f(ltr ? xL : xR)} S0${firstF ? ` F${layer.speed}` : ''}`);
       firstF = false;
       const order = ltr ? range(a, b) : range(a, b).reverse();
@@ -141,10 +153,10 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
         runEnd = edge;
       }
       out.push(`G1 X${f(runEnd)} S${curS}`);
-      const endX = ltr ? xR + ov : xL - ov;
+      const endX = ltr ? xR + ovR : xL - ovL;
       out.push(`G1 X${f(endX)} S0`);
       cut.push([{ x: xL, y }, { x: xR, y }]);
-      seconds += ((xR - xL + 2 * ov) / layer.speed) * 60;
+      seconds += ((xR - xL + ovL + ovR) / layer.speed) * 60;
       pos = { x: endX, y };
       dirLTR = !dirLTR;
     }
@@ -153,7 +165,7 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
   out.push('M5 S0');
   g0(startPos);
   out.push('M2');
-  return { lines: out, bounds: jobBounds(items, opt), seconds, preview: { cut, travel } };
+  return { lines: out, bounds: jobBounds(items, opt), motion: gcodeBounds(out), seconds, preview: { cut, travel } };
 }
 
 function range(a: number, b: number) {
@@ -183,4 +195,37 @@ export function frameGcode(items: Item[], m: MachineProfile, opt: JobOptions): s
   ];
   if (back) lines.push(`G0 X${f(back.x)} Y${f(back.y)}`);
   return lines;
+}
+
+/**
+ * Bounding box of every position the G-code moves to (absolute G90 coordinates).
+ * Used to check the real toolpath against the machine travel, not just the design.
+ */
+export function gcodeBounds(lines: string[]): Bounds {
+  const b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  let x: number | null = null;
+  let y: number | null = null;
+  for (const raw of lines) {
+    const l = raw.replace(/;.*$/, '').toUpperCase();
+    const mx = l.match(/X(-?[\d.]+)/);
+    const my = l.match(/Y(-?[\d.]+)/);
+    if (!mx && !my) continue;
+    if (/\bG(10|92|53)\b/.test(l)) continue; // coordinate-system setup, not a move
+    if (mx) x = parseFloat(mx[1]);
+    if (my) y = parseFloat(my[1]);
+    if (x !== null) {
+      b.minX = Math.min(b.minX, x);
+      b.maxX = Math.max(b.maxX, x);
+    }
+    if (y !== null) {
+      b.minY = Math.min(b.minY, y);
+      b.maxY = Math.max(b.maxY, y);
+    }
+  }
+  return b;
+}
+
+/** True when the bounds stay inside the bed (0..bedW × 0..bedH), with a tiny tolerance. */
+export function insideBed(b: Bounds, m: Pick<MachineProfile, 'bedW' | 'bedH'>, tol = 0.001): boolean {
+  return b.minX >= -tol && b.minY >= -tol && b.maxX <= m.bedW + tol && b.maxY <= m.bedH + tol;
 }

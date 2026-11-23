@@ -8,14 +8,21 @@ export interface PortInfo {
   friendlyName: string;
 }
 
+export type JobState = 'idle' | 'running' | 'paused' | 'completing' | 'done' | 'aborted' | 'failed';
+export type StopReason = 'stopped' | 'alarm' | 'reset' | 'disconnected' | 'error';
+
+/** Mirrors JobProgress in src/main/grbl.ts */
 export interface JobProgress {
-  running: boolean;
-  paused: boolean;
+  state: JobState;
   total: number;
   sent: number;
   acked: number;
   errors: number;
+  reason?: StopReason;
+  detail?: string;
 }
+
+export const isJobActive = (p: JobProgress | null) => !!p && (p.state === 'running' || p.state === 'paused' || p.state === 'completing');
 
 export interface GrblStatus {
   state: string; // Idle, Run, Hold:0, Jog, Alarm, Door, Check, Home, Sleep
@@ -37,6 +44,7 @@ declare global {
       pause(): Promise<void>;
       resume(): Promise<void>;
       abort(): Promise<void>;
+      checkMachine(): Promise<{ state: string; settings: Record<string, string>; jobActive: boolean }>;
       openFiles(): Promise<{ name: string; data: Uint8Array }[]>;
       saveText(name: string, text: string, kind?: 'gcode' | 'project'): Promise<boolean>;
       openProject(): Promise<{ name: string; text: string } | null>;
@@ -79,7 +87,19 @@ export function useGrbl() {
       const am = line.match(/^ALARM:(\d+)/);
       push(am && ALARMS.has(am[1]) ? `${line}  ← ${t(`alarm.${am[1]}` as Key)}` : line);
     });
-    const off2 = window.laser.onProgress((p) => setProgress(p));
+    let last: JobState | null = null;
+    const off2 = window.laser.onProgress((p) => {
+      setProgress(p);
+      if (p.state === last) return;
+      last = p.state;
+      // Report how the job ended; anything but a normal finish or the user's own STOP gets an alert
+      if (p.state === 'done') push(t('job.done'));
+      if (p.state === 'aborted' || p.state === 'failed') {
+        const msg = p.state === 'failed' ? t('job.failed', { detail: p.detail ?? '' }) : t(`job.reason.${p.reason ?? 'stopped'}` as Key);
+        push(`⚠ ${msg}`);
+        if (p.reason !== 'stopped') setTimeout(() => alert(msg), 0);
+      }
+    });
     const off3 = window.laser.onClosed(() => {
       setConnected(false);
       push(t('log.disconnected'));
@@ -97,7 +117,7 @@ export function useGrbl() {
       setConnected(true);
       push(t('log.connected', { port: path, baud }));
       // GRBL boards usually reset when the port opens; send $I to confirm the version
-      setTimeout(() => window.laser.send(['$I']), 1500);
+      setTimeout(() => window.laser.send(['$I']).catch(() => {}), 1500);
     },
     [push],
   );
@@ -111,12 +131,15 @@ export function useGrbl() {
     (lines: string[] | string) => {
       const arr = Array.isArray(lines) ? lines : [lines];
       arr.forEach((l) => push(`> ${l}`));
-      return window.laser.send(arr);
+      return window.laser.send(arr).catch((e: Error) => {
+        // Manual commands are refused while a job runs, so they can never mix into it
+        push(e.message.includes('BUSY') ? `⚠ ${t('job.busy')}` : `⚠ ${e.message}`);
+      });
     },
     [push],
   );
 
-  return { connected, status, log, progress, version, connect, disconnect, send, push, wco };
+  return { connected, status, log, progress, jobActive: isJobActive(progress), version, connect, disconnect, send, push, wco };
 }
 
 function parseStatus(line: string, wco: Pt): GrblStatus {

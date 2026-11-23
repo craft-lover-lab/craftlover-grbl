@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Anchor, Item, JobOptions, Layer, MachineProfile, MaterialPreset, OriginMode, Pt } from '../core/types';
+import type { Anchor, Bounds, Item, JobOptions, Layer, MachineProfile, MaterialPreset, OriginMode, Pt } from '../core/types';
 import { itemBounds, uid } from '../core/geometry';
-import { frameGcode, generateJob, jobBounds } from '../core/gcode';
+import { frameGcode, gcodeBounds, generateJob, insideBed, jobBounds } from '../core/gcode';
 import { importSvg } from '../io/svg';
 import { importPdf, importRaster } from '../io/image';
 import { textToPaths, type TextAlign } from '../io/text';
@@ -228,7 +228,8 @@ export function App() {
   }, [items, selectedIds]);
 
   const jobOpt: JobOptions = { originMode, anchor, currentPos: g.status.wpos };
-  const running = !!g.progress?.running;
+  // A job is running, paused or finishing: manual control and new jobs are locked
+  const running = g.jobActive;
 
   const job = useMemo(() => {
     if (!showPreview || items.length === 0) return null;
@@ -495,14 +496,45 @@ export function App() {
   (window as any).__laserSetCopies = (cols: number, rows: number) => setItems((a) => a.map((i, k) => (k === 0 ? { ...i, copies: { ...i.copies, cols, rows } } : i)));
 
   // ---------- Running jobs ----------
+  /** Confirm when the real toolpath (overscan and travel included) leaves the bed. */
+  function confirmInsideBed(b: Bounds) {
+    if (insideBed(b, machine)) return true;
+    const msg = t('job.outOfBed', { x0: b.minX.toFixed(1), y0: b.minY.toFixed(1), x1: b.maxX.toFixed(1), y1: b.maxY.toFixed(1), w: machine.bedW, h: machine.bedH });
+    return confirm(msg);
+  }
+
   function buildJob() {
     if (items.length === 0) throw new Error(t('job.empty'));
-    const b = jobBounds(items, jobOpt);
-    if (b.minX < -0.01 || b.minY < -0.01 || b.maxX > machine.bedW + 0.01 || b.maxY > machine.bedH + 0.01) {
-      const msg = t('job.outOfBed', { x0: b.minX.toFixed(1), y0: b.minY.toFixed(1), x1: b.maxX.toFixed(1), y1: b.maxY.toFixed(1), w: machine.bedW, h: machine.bedH });
-      if (!confirm(msg)) return null;
+    const j = generateJob(items, layers, machine, jobOpt);
+    return confirmInsideBed(j.motion) ? j : null;
+  }
+
+  /**
+   * Make sure the controller is really ready before anything moves:
+   * Idle state, and for jobs also laser mode ($32=1) and a matching S max ($30).
+   */
+  async function machineReady(kind: 'job' | 'frame'): Promise<boolean> {
+    let r: Awaited<ReturnType<typeof window.laser.checkMachine>>;
+    try {
+      r = await window.laser.checkMachine();
+    } catch (e) {
+      alert(t('check.failed', { msg: errorText(e) }));
+      return false;
     }
-    return generateJob(items, layers, machine, jobOpt);
+    const problems: string[] = [];
+    const state = r.state.split(':')[0];
+    if (r.jobActive) problems.push(t('job.busy'));
+    if (state !== 'Idle') problems.push(state === 'Alarm' ? t('check.alarm') : t('check.notIdle', { state: r.state || '?' }));
+    if (kind === 'job') {
+      if (r.settings['$32'] !== '1') problems.push(t('check.laserMode', { value: r.settings['$32'] ?? '?' }));
+      const smax = Number(r.settings['$30']);
+      if (!Number.isFinite(smax) || smax !== machine.sMax) problems.push(t('check.sMax', { grbl: r.settings['$30'] ?? '?', app: machine.sMax }));
+    }
+    if (problems.length) {
+      alert(`${t('check.title')}\n\n• ${problems.join('\n• ')}`);
+      return false;
+    }
+    return true;
   }
 
   async function exportGcode() {
@@ -518,6 +550,7 @@ export function App() {
     try {
       const j = buildJob();
       if (!j) return;
+      if (!(await machineReady('job'))) return;
       if (!confirm(t('job.confirmStart', { n: j.lines.length, time: fmtTime(j.seconds) }))) return;
       await window.laser.run(j.lines);
     } catch (e) {
@@ -528,6 +561,8 @@ export function App() {
   async function runFrame() {
     const lines = frameGcode(items, machine, jobOpt);
     if (!lines.length) return alert(t('frame.empty'));
+    if (!confirmInsideBed(gcodeBounds(lines))) return;
+    if (!(await machineReady('frame'))) return;
     await g.send(lines);
   }
 
@@ -572,8 +607,8 @@ export function App() {
         <button className="go" onClick={startJob} disabled={!g.connected || running || !items.length}>
           ▶ {t('tb.start')}
         </button>
-        {running && !g.progress?.paused && <button onClick={() => window.laser.pause()}>⏸ {t('tb.pause')}</button>}
-        {running && g.progress?.paused && <button onClick={() => window.laser.resume()}>⏵ {t('tb.resume')}</button>}
+        {running && g.progress?.state !== 'paused' && <button onClick={() => window.laser.pause()}>⏸ {t('tb.pause')}</button>}
+        {g.progress?.state === 'paused' && <button onClick={() => window.laser.resume()}>⏵ {t('tb.resume')}</button>}
         <button className="stop" onClick={() => window.laser.abort()} disabled={!g.connected}>
           ■ {t('tb.stop')}
         </button>
@@ -613,7 +648,7 @@ export function App() {
           <Palette layers={layers} activeId={activeLayerId} onPick={pickColor} />
         </div>
         <aside className="side">
-          <ConnectionPanel g={g} machine={machine} setMachine={setMachine} />
+          <ConnectionPanel g={g} machine={machine} setMachine={setMachine} locked={running} />
           <JogPanel g={g} jog={jog} disabled={!g.connected || running} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
           {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} />}
@@ -668,7 +703,8 @@ export function App() {
         <span>X {g.status.wpos.x.toFixed(2)}</span>
         <span>Y {g.status.wpos.y.toFixed(2)}</span>
         {g.progress && g.progress.total > 0 && (
-          <span>
+          <span className={`job-${g.progress.state}`}>
+            {t(`job.state.${g.progress.state}` as Key)} ·{' '}
             {t('status.progress', { pct: Math.round((100 * g.progress.acked) / g.progress.total), done: g.progress.acked, total: g.progress.total })}
             {g.progress.errors > 0 && t('status.errors', { n: g.progress.errors })}
           </span>

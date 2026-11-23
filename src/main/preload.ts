@@ -16,6 +16,7 @@ const api = {
   pause: () => ipcRenderer.invoke('grbl:pause'),
   resume: () => ipcRenderer.invoke('grbl:resume'),
   abort: () => ipcRenderer.invoke('grbl:abort'),
+  checkMachine: () => ipcRenderer.invoke('grbl:check'),
   openFiles: () => ipcRenderer.invoke('file:open'),
   saveText: (name: string, text: string, kind?: 'gcode' | 'project') => ipcRenderer.invoke('file:saveText', name, text, kind),
   openProject: () => ipcRenderer.invoke('file:openProject'),

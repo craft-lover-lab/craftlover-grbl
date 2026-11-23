@@ -75,8 +75,8 @@ export const vi: Record<Key, string> = {
   'project.openFailed': 'Không mở được dự án: {msg}',
 
   'job.empty': 'Chưa có đối tượng nào',
-  'job.outOfBed': 'Vùng cắt ({x0}, {y0}) → ({x1}, {y1}) vượt ra ngoài bàn máy {w}×{h} mm. Vẫn tiếp tục?',
-  'job.confirmStart': 'Bắt đầu chạy {n} dòng lệnh (ước tính {time})?\nHãy đeo kính bảo hộ và kiểm tra phôi.',
+  'job.outOfBed': 'Đường chạy ({x0}, {y0}) → ({x1}, {y1}) — kể cả đi quá biên và di chuyển không cắt — vượt ra ngoài bàn máy {w}×{h} mm. Vẫn tiếp tục?',
+  'job.confirmStart': 'Bắt đầu chạy {n} dòng lệnh (ước tính {time})?\nHãy đeo kính bảo hộ và kiểm tra phôi.\nNút DỪNG là dừng bằng phần mềm — hãy để công tắc nguồn / nút dừng khẩn cấp của máy trong tầm tay.',
   'frame.empty': 'Chưa có đối tượng nào để chạy khung',
 
   'conn.title': 'Kết nối máy',
@@ -102,8 +102,7 @@ export const vi: Record<Key, string> = {
   'jog.unlockTip': 'Mở khóa sau báo động',
   'jog.fire': 'Bắn tia 1%',
   'jog.fireOff': 'Tắt tia',
-  'jog.fireTip': 'Bật tia công suất 1% để căn chỉnh — không để đứng yên một chỗ',
-
+  'jog.fireTip': 'Bật tia công suất 1% để căn chỉnh — tự tắt sau 10 giây',
   'jobp.title': 'Công việc',
   'jobp.absolute': 'Theo gốc làm việc (vị trí trên bàn)',
   'jobp.current': 'Từ vị trí đầu laser hiện tại',
@@ -212,6 +211,29 @@ export const vi: Record<Key, string> = {
   'shape.rect': 'Hình chữ nhật',
   'shape.ellipse': 'Elip',
   'shape.polygon': 'Đa giác {n} cạnh',
+
+  // Job state and pre-start checks
+  'job.busy': 'Đang chạy job — lệnh thủ công bị khóa cho tới khi job kết thúc',
+  'job.done': 'Job đã chạy xong',
+  'job.failed': 'Job đã dừng: GRBL từ chối một dòng lệnh ({detail}). Máy đã được dừng tạm rồi reset.',
+  'job.reason.stopped': 'Job đã bị người dùng dừng',
+  'job.reason.alarm': 'Job bị hủy: máy báo động (ALARM)',
+  'job.reason.reset': 'Job bị hủy: bo mạch vừa khởi động lại. Không chạy tiếp — hãy kiểm tra lại vị trí rồi chạy lại job.',
+  'job.reason.disconnected': 'Job bị hủy: mất kết nối với máy',
+  'job.reason.error': 'Job dừng vì lỗi G-code',
+  'job.state.idle': 'Rảnh',
+  'job.state.running': 'Đang chạy',
+  'job.state.paused': 'Tạm dừng',
+  'job.state.completing': 'Đang chạy nốt',
+  'job.state.done': 'Xong',
+  'job.state.aborted': 'Đã hủy',
+  'job.state.failed': 'Lỗi',
+  'check.title': 'Máy chưa sẵn sàng:',
+  'check.failed': 'Không đọc được trạng thái máy: {msg}',
+  'check.alarm': 'Máy đang ở trạng thái ALARM — hãy bấm "Mở khóa $X" (hoặc Homing) trước',
+  'check.notIdle': 'Máy chưa ở trạng thái rảnh (trạng thái: {state}) — hãy đợi máy dừng hẳn',
+  'check.laserMode': 'Chế độ laser đang tắt ($32={value}). Gửi $32=1, nếu không laser sẽ vẫn sáng khi di chuyển không cắt.',
+  'check.sMax': 'S max không khớp: GRBL $30={grbl}, phần mềm S max={app}. Hãy chỉnh cho bằng nhau trong bảng Công việc hoặc bằng lệnh $30=…',
 
   // Layers order, material library, test grid
   'tb.library': 'Vật liệu',
