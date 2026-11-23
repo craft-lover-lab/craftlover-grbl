@@ -59,16 +59,16 @@ export function generateJob(items: Item[], layers: Layer[], m: MachineProfile, o
     pos = p;
   };
 
-  out.push('; Laser Tool — G-code cho GRBL 1.1 (chế độ laser $32=1)');
-  out.push(`; Tạo lúc ${new Date().toLocaleString('vi-VN')}`);
+  out.push('; CraftLover GRBL - G-code for GRBL 1.1 (laser mode $32=1)');
+  out.push(`; Created ${new Date().toISOString()}`);
   out.push('G90 G21', 'G17', 'M5 S0');
 
   for (const { layer, items: its } of orderedWork(items, layers)) {
-    out.push(`; ---- Lớp "${layer.name}" (${layer.mode}) tốc độ ${layer.speed} mm/ph, công suất ${layer.power}% x${layer.passes} lượt`);
+    out.push(`; ---- Layer ${layer.id} (${layer.mode}) speed ${layer.speed} mm/min, power ${layer.power}%, ${layer.passes} pass(es)`);
     // M4 = công suất động: GRBL tự giảm công suất khi đầu laser chạy chậm ở góc → nét đều hơn
     out.push('M4 S0');
     for (let pass = 0; pass < Math.max(1, layer.passes); pass++) {
-      if (layer.passes > 1) out.push(`; Lượt ${pass + 1}/${layer.passes}`);
+      if (layer.passes > 1) out.push(`; Pass ${pass + 1}/${layer.passes}`);
       if (layer.mode === 'line') {
         const all: Polyline[] = [];
         for (const it of its)

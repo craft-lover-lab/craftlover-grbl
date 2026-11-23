@@ -17,7 +17,7 @@ button.tiny { padding: 1px 6px; font-size: 11px; float: right; }
 input, select { background: #16181c; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; font: inherit; min-width: 0; width: 100%; }
 input[type=checkbox] { width: auto; }
 .toolbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.brand { margin-right: 8px; }
+.brand { margin-right: 8px; white-space: nowrap; flex: none; }
 .spacer { flex: 1; }
 .muted { color: var(--muted); font-size: 12px; }
 .chk { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -53,7 +53,10 @@ textarea { background: #16181c; color: var(--text); border: 1px solid var(--line
 .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 10; }
 .modal { width: 420px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .modal h3 { margin: 0; }
-.toolbar { flex-wrap: wrap; }
+.toolbar { flex-wrap: nowrap; overflow: hidden; }
+.toolbar > .muted { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar > .spacer { min-width: 0; }
+.toolbar > button, .toolbar > label, .toolbar > select { flex: none; }
 
 /* ---------- Trình thiết kế ---------- */
 .toolbox { width: 46px; display: flex; flex-direction: column; gap: 4px; padding: 6px 4px; background: var(--panel); border-right: 1px solid var(--line); align-items: center; }
@@ -76,3 +79,4 @@ textarea { background: #16181c; color: var(--text); border: 1px solid var(--line
 .palette .muted { margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
 .ws-coords { position: absolute; right: 10px; top: 6px; color: var(--muted); font: 11px Consolas, monospace; display: flex; gap: 8px; align-items: center; }
 .ws-coords .tiny { float: none; }
+.toolbar select.lang { width: auto; margin-left: 4px; }

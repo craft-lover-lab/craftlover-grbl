@@ -53,7 +53,7 @@ export class GrblConnection {
         this.port = null;
         this.ev.onClose();
       });
-      port.on('error', (err) => this.ev.onLine(`[LỖI CỔNG] ${err.message}`));
+      port.on('error', (err) => this.ev.onLine(`[PORT ERROR] ${err.message}`));
       port.open((err) => {
         if (err) return reject(err);
         this.port = port;
@@ -87,7 +87,7 @@ export class GrblConnection {
   }
 
   runJob(lines: string[]) {
-    if (this.job.running) throw new Error('Đang có lệnh chạy');
+    if (this.job.running) throw new Error('JOB_RUNNING');
     const clean = lines.map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
     this.job = { running: true, paused: false, total: clean.length, sent: 0, acked: 0, errors: 0 };
     this.queue.push(...clean);

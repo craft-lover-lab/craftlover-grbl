@@ -1,0 +1,335 @@
+import { useEffect, useState } from 'react';
+import type { Anchor, Item, Layer, MachineProfile, OriginMode } from '../core/types';
+import type { TraceOptions } from '../core/trace';
+import { shapePaths } from '../core/shapes';
+import { useGrbl, type PortInfo } from '../machine/useGrbl';
+import { errorText, t } from '../i18n';
+import { NumField } from './DesignBars';
+
+type G = ReturnType<typeof useGrbl>;
+
+// ---------- Machine connection + console ----------
+export function ConnectionPanel({ g, machine, setMachine }: { g: G; machine: MachineProfile; setMachine: (m: MachineProfile) => void }) {
+  const [ports, setPorts] = useState<PortInfo[]>([]);
+  const [port, setPort] = useState('');
+  const [cmd, setCmd] = useState('');
+  const refresh = async () => {
+    const l = await window.laser.listPorts();
+    setPorts(l);
+    if (!port && l.length) setPort(l[0].path);
+  };
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <section className="panel">
+      <h3>{t('conn.title')}</h3>
+      <div className="row">
+        <select value={port} onChange={(e) => setPort(e.target.value)} disabled={g.connected}>
+          {ports.length === 0 && <option value="">{t('conn.noPorts')}</option>}
+          {ports.map((p) => (
+            <option key={p.path} value={p.path}>
+              {p.path} {p.friendlyName || p.manufacturer}
+            </option>
+          ))}
+        </select>
+        <button onClick={refresh} disabled={g.connected} title={t('conn.rescan')}>
+          ⟳
+        </button>
+      </div>
+      <div className="row">
+        <select value={machine.baud} onChange={(e) => setMachine({ ...machine, baud: +e.target.value })} disabled={g.connected}>
+          {[115200, 250000, 57600, 9600].map((b) => (
+            <option key={b}>{b}</option>
+          ))}
+        </select>
+        {g.connected ? (
+          <button onClick={g.disconnect}>{t('conn.disconnect')}</button>
+        ) : (
+          <button className="go" disabled={!port} onClick={() => g.connect(port, machine.baud).catch((e) => alert(t('conn.openFailed', { msg: errorText(e) })))}>
+            {t('conn.connect')}
+          </button>
+        )}
+      </div>
+      <div className="console">
+        {g.log
+          .slice(-80)
+          .reverse()
+          .map((l, i) => (
+            <div key={i} className={l.startsWith('error') || l.startsWith('ALARM') ? 'err' : l.startsWith('>') ? 'out' : ''}>
+              {l}
+            </div>
+          ))}
+      </div>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (cmd.trim()) g.send(cmd.trim());
+          setCmd('');
+        }}
+      >
+        <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={t('conn.cmdPlaceholder')} disabled={!g.connected} />
+        <button disabled={!g.connected}>{t('conn.send')}</button>
+      </form>
+    </section>
+  );
+}
+
+// ---------- Jogging, origin, homing ----------
+export function JogPanel({ g, jog, disabled }: { g: G; jog: (dx: number, dy: number, step: number, feed: number) => void; disabled: boolean }) {
+  const [step, setStep] = useState(10);
+  const [feed, setFeed] = useState(3000);
+  const [firing, setFiring] = useState(false);
+  const fire = async () => {
+    if (firing) {
+      await g.send(['M5 S0']);
+      setFiring(false);
+    } else {
+      // Very weak (1%) beam to see the position — never leave it in one spot
+      await g.send(['M3 S10', 'G1 F1000']);
+      setFiring(true);
+    }
+  };
+  return (
+    <section className="panel">
+      <h3>{t('jog.title')}</h3>
+      <div className="jog">
+        <span />
+        <button disabled={disabled} onClick={() => jog(0, 1, step, feed)}>▲ Y+</button>
+        <span />
+        <button disabled={disabled} onClick={() => jog(-1, 0, step, feed)}>◀ X−</button>
+        <button disabled={disabled} onClick={() => g.send('G90 G0 X0 Y0')} title={t('jog.home')}>⌂</button>
+        <button disabled={disabled} onClick={() => jog(1, 0, step, feed)}>X+ ▶</button>
+        <span />
+        <button disabled={disabled} onClick={() => jog(0, -1, step, feed)}>▼ Y−</button>
+        <span />
+      </div>
+      <div className="row">
+        <label>{t('jog.step')}</label>
+        {[0.1, 1, 10, 50].map((s) => (
+          <button key={s} className={s === step ? 'sel' : ''} onClick={() => setStep(s)}>
+            {s}
+          </button>
+        ))}
+      </div>
+      <div className="row">
+        <label>{t('jog.speed')}</label>
+        <input type="number" value={feed} onChange={(e) => setFeed(+e.target.value)} />
+      </div>
+      <div className="row wrap">
+        <button disabled={disabled} onClick={() => g.send('G10 L20 P1 X0 Y0')} title={t('jog.setOriginTip')}>
+          📍 {t('jog.setOrigin')}
+        </button>
+        <button disabled={disabled} onClick={() => g.send('$H')} title={t('jog.homingTip')}>
+          {t('jog.homing')}
+        </button>
+        <button disabled={!g.connected} onClick={() => g.send('$X')} title={t('jog.unlockTip')}>
+          {t('jog.unlock')}
+        </button>
+        <button disabled={disabled} className={firing ? 'warn' : ''} onClick={fire} title={t('jog.fireTip')}>
+          {firing ? `🔴 ${t('jog.fireOff')}` : `🔆 ${t('jog.fire')}`}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ---------- Job origin, framing, machine profile ----------
+const ANCHORS: Anchor[] = ['tl', 't', 'tr', 'l', 'c', 'r', 'bl', 'b', 'br'];
+
+export function JobPanel(p: {
+  originMode: OriginMode;
+  setOriginMode: (m: OriginMode) => void;
+  anchor: Anchor;
+  setAnchor: (a: Anchor) => void;
+  machine: MachineProfile;
+  setMachine: (m: MachineProfile) => void;
+}) {
+  const m = p.machine;
+  return (
+    <section className="panel">
+      <h3>{t('jobp.title')}</h3>
+      <div className="row">
+        <select value={p.originMode} onChange={(e) => p.setOriginMode(e.target.value as OriginMode)}>
+          <option value="absolute">{t('jobp.absolute')}</option>
+          <option value="current">{t('jobp.current')}</option>
+        </select>
+      </div>
+      {p.originMode === 'current' && (
+        <div className="row">
+          <label>{t('jobp.anchor')}</label>
+          <div className="anchors">
+            {ANCHORS.map((a) => (
+              <button key={a} className={a === p.anchor ? 'sel' : ''} onClick={() => p.setAnchor(a)} />
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="grid2">
+        <label>{t('jobp.frameSpeed')}</label>
+        <input type="number" value={m.frameSpeed} onChange={(e) => p.setMachine({ ...m, frameSpeed: +e.target.value })} />
+        <label>{t('jobp.framePower')}</label>
+        <input type="number" step={0.5} min={0} max={5} value={m.framePower} onChange={(e) => p.setMachine({ ...m, framePower: Math.min(5, +e.target.value) })} />
+        <label>{t('jobp.bed')}</label>
+        <div className="row">
+          <input type="number" value={m.bedW} onChange={(e) => p.setMachine({ ...m, bedW: +e.target.value })} />
+          <input type="number" value={m.bedH} onChange={(e) => p.setMachine({ ...m, bedH: +e.target.value })} />
+        </div>
+        <label>{t('jobp.sMax')}</label>
+        <input type="number" value={m.sMax} onChange={(e) => p.setMachine({ ...m, sMax: +e.target.value })} />
+      </div>
+    </section>
+  );
+}
+
+// ---------- Properties of the single selected object ----------
+export function ItemPanel({ item, layers, patch, onTrace }: { item: Item; layers: Layer[]; patch: (p: Partial<Item>) => void; onTrace: (o: TraceOptions) => void }) {
+  const [th, setTh] = useState(128);
+  const [smooth, setSmooth] = useState(0.8);
+  /** Changing a shape parameter (corner radius, sides) regenerates the paths at the current size */
+  const reshape = (spec: NonNullable<Item['shape']>) => {
+    const paths = shapePaths(spec, item.w, item.h);
+    if (paths) patch({ shape: spec, paths, srcW: item.w, srcH: item.h });
+  };
+  return (
+    <section className="panel">
+      <h3 title={item.name}>{t('item.title', { name: item.name })}</h3>
+      <div className="row">
+        <label>{t('item.name')}</label>
+        <input value={item.name} onChange={(e) => patch({ name: e.target.value })} />
+      </div>
+      <div className="row">
+        <label>{t('item.layer')}</label>
+        <select value={item.layerId} onChange={(e) => patch({ layerId: e.target.value })}>
+          {layers
+            .filter((l) => (item.kind === 'bitmap') === (l.mode === 'image'))
+            .map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+        </select>
+      </div>
+      <div className="row">
+        <button onClick={() => patch({ w: item.srcW, h: item.srcH })}>{t('item.origSize')}</button>
+      </div>
+      {item.shape?.type === 'rect' && (
+        <div className="row">
+          <label>{t('item.radius')}</label>
+          <NumField value={item.shape.radius ?? 0} min={0} step={0.5} onCommit={(v) => reshape({ type: 'rect', radius: v })} />
+        </div>
+      )}
+      {item.shape?.type === 'polygon' && (
+        <div className="row">
+          <label>{t('item.sides')}</label>
+          <NumField value={item.shape.sides ?? 6} min={3} step={1} onCommit={(v) => reshape({ type: 'polygon', sides: Math.round(v) })} />
+        </div>
+      )}
+      {item.kind === 'bitmap' && (
+        <>
+          <h4>{t('item.traceTitle')}</h4>
+          <div className="row">
+            <label>{t('item.threshold')}</label>
+            <input type="range" min={1} max={254} value={th} onChange={(e) => setTh(+e.target.value)} />
+            <span className="muted">{th}</span>
+          </div>
+          <div className="row">
+            <label>{t('item.smooth')}</label>
+            <input type="range" min={0} max={3} step={0.1} value={smooth} onChange={(e) => setSmooth(+e.target.value)} />
+            <span className="muted">{smooth}</span>
+          </div>
+          <button onClick={() => onTrace({ threshold: th, minArea: 0.5, smooth })}>✎ {t('item.trace')}</button>
+        </>
+      )}
+      <h4>{t('item.copiesTitle')}</h4>
+      <div className="grid4">
+        <label>{t('item.cols')}</label>
+        <input type="number" min={1} value={item.copies.cols} onChange={(e) => patch({ copies: { ...item.copies, cols: Math.max(1, Math.floor(+e.target.value)) } })} />
+        <label>{t('item.rows')}</label>
+        <input type="number" min={1} value={item.copies.rows} onChange={(e) => patch({ copies: { ...item.copies, rows: Math.max(1, Math.floor(+e.target.value)) } })} />
+        <label>{t('item.gapX')}</label>
+        <input type="number" step={0.5} value={item.copies.gapX} onChange={(e) => patch({ copies: { ...item.copies, gapX: +e.target.value } })} />
+        <label>{t('item.gapY')}</label>
+        <input type="number" step={0.5} value={item.copies.gapY} onChange={(e) => patch({ copies: { ...item.copies, gapY: +e.target.value } })} />
+      </div>
+      <div className="muted">{t('item.total', { n: item.copies.cols * item.copies.rows })}</div>
+    </section>
+  );
+}
+
+// ---------- Layer (cut settings) list ----------
+export function LayersPanel({ layers, patch, reset }: { layers: Layer[]; patch: (id: string, p: Partial<Layer>) => void; reset: () => void }) {
+  const [open, setOpen] = useState<string | null>('cut');
+  return (
+    <section className="panel">
+      <h3>
+        {t('layers.title')}{' '}
+        <button className="tiny" onClick={reset}>
+          {t('layers.reset')}
+        </button>
+      </h3>
+      {layers.map((l) => (
+        <div key={l.id} className="layer">
+          <div className="layer-head" onClick={() => setOpen(open === l.id ? null : l.id)}>
+            <input type="checkbox" checked={l.enabled} onClick={(e) => e.stopPropagation()} onChange={(e) => patch(l.id, { enabled: e.target.checked })} />
+            <span className="swatch" style={{ background: l.color }} />
+            <b>{l.name}</b>
+            <span className="muted">{t('layers.summary', { speed: l.speed, power: l.power, passes: l.passes })}</span>
+          </div>
+          {open === l.id && (
+            <div className="grid2">
+              <label>{t('lp.name')}</label>
+              <input value={l.name} onChange={(e) => patch(l.id, { name: e.target.value })} />
+              <label>{t('lp.mode')}</label>
+              <select value={l.mode} onChange={(e) => patch(l.id, { mode: e.target.value as Layer['mode'] })}>
+                <option value="line">{t('mode.line')}</option>
+                <option value="fill">{t('mode.fill')}</option>
+                <option value="image">{t('mode.image')}</option>
+              </select>
+              <label>{t('lp.speed')}</label>
+              <input type="number" value={l.speed} onChange={(e) => patch(l.id, { speed: Math.max(1, +e.target.value) })} />
+              <label>{t('lp.power')}</label>
+              <input type="number" min={0} max={100} value={l.power} onChange={(e) => patch(l.id, { power: Math.min(100, Math.max(0, +e.target.value)) })} />
+              <label>{t('lp.passes')}</label>
+              <input type="number" min={1} value={l.passes} onChange={(e) => patch(l.id, { passes: Math.max(1, Math.floor(+e.target.value)) })} />
+              {l.mode !== 'line' && (
+                <>
+                  <label>{t('lp.interval')}</label>
+                  <input type="number" step={0.01} min={0.03} value={l.lineInterval} onChange={(e) => patch(l.id, { lineInterval: Math.max(0.03, +e.target.value) })} />
+                  <label>{t('lp.overscan')}</label>
+                  <input type="number" step={0.5} min={0} value={l.overscan} onChange={(e) => patch(l.id, { overscan: Math.max(0, +e.target.value) })} />
+                  <label>{t('lp.bidir')}</label>
+                  <input type="checkbox" checked={l.bidirectional} onChange={(e) => patch(l.id, { bidirectional: e.target.checked })} />
+                </>
+              )}
+              {l.mode === 'image' && (
+                <>
+                  <label>{t('lp.dither')}</label>
+                  <select value={l.dither} onChange={(e) => patch(l.id, { dither: e.target.value as Layer['dither'] })}>
+                    <option value="floyd">{t('dither.floyd')}</option>
+                    <option value="threshold">{t('dither.threshold')}</option>
+                    <option value="grayscale">{t('dither.grayscale')}</option>
+                  </select>
+                  {l.dither === 'threshold' && (
+                    <>
+                      <label>{t('lp.threshold')}</label>
+                      <input type="range" min={1} max={254} value={l.threshold} onChange={(e) => patch(l.id, { threshold: +e.target.value })} />
+                    </>
+                  )}
+                  {l.dither === 'grayscale' && (
+                    <>
+                      <label>{t('lp.minPower')}</label>
+                      <input type="number" min={0} max={l.power} value={l.minPower} onChange={(e) => patch(l.id, { minPower: +e.target.value })} />
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}

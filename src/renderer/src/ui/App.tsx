@@ -7,13 +7,14 @@ import { importPdf, importRaster } from '../io/image';
 import { textToPaths, type TextAlign } from '../io/text';
 import { parseProject, serializeProject } from '../io/project';
 import { traceBitmap, type TraceOptions } from '../core/trace';
-import { useGrbl, type PortInfo } from '../machine/useGrbl';
+import { useGrbl } from '../machine/useGrbl';
+import { allTranslations, errorText, LANGS, setLang, t, useLang, type Key, type Lang } from '../i18n';
 import { Workspace, type NewItem, type Tool } from './Workspace';
 import { TextDialog } from './TextDialog';
 import { useHistory } from './useHistory';
-import { NumField, Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
+import { Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
+import { ConnectionPanel, ItemPanel, JobPanel, JogPanel, LayersPanel } from './Panels';
 import { alignItems, cloneItems, distributeItems, flipItems, moveItems, rotateItems, scaleItems, selBounds } from './designOps';
-import { shapePaths } from '../core/shapes';
 
 const DEFAULT_MACHINE: MachineProfile = {
   bedW: 410,
@@ -26,12 +27,16 @@ const DEFAULT_MACHINE: MachineProfile = {
 };
 
 const baseLayer = { minPower: 0, passes: 1, lineInterval: 0.1, dither: 'floyd' as const, threshold: 128, overscan: 2.5, bidirectional: true, enabled: true };
-const DEFAULT_LAYERS: Layer[] = [
-  { ...baseLayer, id: 'cut', name: 'Cắt', color: '#e5243b', mode: 'line', speed: 300, power: 100 },
-  { ...baseLayer, id: 'score', name: 'Khắc nét', color: '#2f7cf6', mode: 'line', speed: 3000, power: 30 },
-  { ...baseLayer, id: 'fill', name: 'Khắc tô', color: '#18a058', mode: 'fill', speed: 6000, power: 40 },
-  { ...baseLayer, id: 'image', name: 'Khắc ảnh', color: '#333333', mode: 'image', speed: 3000, power: 50 },
+
+/** Default layers, named in the current language. */
+const defaultLayers = (): Layer[] => [
+  { ...baseLayer, id: 'cut', name: t('layer.cut'), color: '#e5243b', mode: 'line', speed: 300, power: 100 },
+  { ...baseLayer, id: 'score', name: t('layer.score'), color: '#2f7cf6', mode: 'line', speed: 3000, power: 30 },
+  { ...baseLayer, id: 'fill', name: t('layer.fill'), color: '#18a058', mode: 'fill', speed: 6000, power: 40 },
+  { ...baseLayer, id: 'image', name: t('layer.image'), color: '#333333', mode: 'image', speed: 3000, power: 50 },
 ];
+
+const COPIES_1 = { cols: 1, rows: 1, gapX: 5, gapY: 5 };
 
 function load<T>(k: string, d: T): T {
   try {
@@ -44,21 +49,22 @@ function load<T>(k: string, d: T): T {
 
 const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
-  return m >= 60 ? `${Math.floor(m / 60)} giờ ${m % 60} phút` : `${m} phút ${Math.round(s % 60)} giây`;
+  return m >= 60 ? t('time.hm', { h: Math.floor(m / 60), m: m % 60 }) : t('time.ms', { m, s: Math.round(s % 60) });
 };
 
 export function App() {
+  const lang = useLang();
   const g = useGrbl();
   const [machine, setMachine] = useState<MachineProfile>(() => load('machine', DEFAULT_MACHINE));
   const [layers, setLayers] = useState<Layer[]>(() => {
     try {
       const v = localStorage.getItem('layers');
-      return v ? JSON.parse(v) : DEFAULT_LAYERS;
+      return v ? JSON.parse(v) : defaultLayers();
     } catch {
-      return DEFAULT_LAYERS;
+      return defaultLayers();
     }
   });
-  // Danh sách đối tượng có hoàn tác/làm lại (Ctrl+Z / Ctrl+Y)
+  // Object list with undo/redo (Ctrl+Z / Ctrl+Y)
   const hist = useHistory<Item[]>([]);
   const items = hist.state;
   const setItems = hist.commit;
@@ -76,19 +82,30 @@ export function App() {
 
   useEffect(() => localStorage.setItem('machine', JSON.stringify(machine)), [machine]);
   useEffect(() => localStorage.setItem('layers', JSON.stringify(layers)), [layers]);
+  // Tell the main process which language to use for native dialogs
+  useEffect(() => {
+    window.laser?.setLang?.(lang);
+    // Default layers whose names were never edited follow the UI language
+    setLayers((ls) =>
+      ls.map((l) => {
+        const key = `layer.${l.id}` as Key;
+        return ['cut', 'score', 'fill', 'image'].includes(l.id) && allTranslations(key).includes(l.name) ? { ...l, name: t(key) } : l;
+      }),
+    );
+  }, [lang]);
 
   const selSet = new Set(selectedIds);
   const selItems = items.filter((i) => selSet.has(i.id));
   const selected = selItems.length === 1 ? selItems[0] : null;
   const patchItem = (id: string, patch: Partial<Item>) => setItems((a) => a.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+  const patchLayer = (id: string, patch: Partial<Layer>) => setLayers((a) => a.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
 
-  // Bỏ chọn các đối tượng đã bị xóa (vd. sau khi hoàn tác)
+  // Drop selection entries whose objects no longer exist (e.g. after undo)
   useEffect(() => {
     const ids = new Set(items.map((i) => i.id));
     if (selectedIds.some((id) => !ids.has(id))) setSelectedIds((s) => s.filter((id) => ids.has(id)));
   }, [items, selectedIds]);
-  const patchLayer = (id: string, patch: Partial<Layer>) => setLayers((a) => a.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
   const jobOpt: JobOptions = { originMode, anchor, currentPos: g.status.wpos };
   const running = !!g.progress?.running;
@@ -103,19 +120,20 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPreview, items, layers, machine, originMode, anchor, originMode === 'current' ? g.status.wpos : null]);
 
+  // ---------- Import ----------
   async function importFiles(given?: { name: string; data: Uint8Array }[]) {
     const files = given ?? (await window.laser.openFiles());
     for (const f of files) {
       const ext = f.name.split('.').pop()!.toLowerCase();
-      setBusy(`Đang nhập ${f.name}…`);
+      setBusy(t('import.busy', { name: f.name }));
       try {
         const add = (it: Omit<Item, 'id' | 'x' | 'y' | 'copies'>) => {
           const id = uid();
           setItems((a) => {
-            // Đặt đối tượng mới bên phải các đối tượng đã có (nếu còn chỗ trên bàn)
+            // Place new objects to the right of existing ones while they still fit on the bed
             const right = a.reduce((m, i) => Math.max(m, itemBounds(i).maxX), 0);
             const x = a.length && right + 5 + it.w <= machine.bedW ? right + 5 : 10;
-            return [...a, { ...it, id, x, y: 10, copies: { cols: 1, rows: 1, gapX: 5, gapY: 5 } }];
+            return [...a, { ...it, id, x, y: 10, copies: COPIES_1 }];
           });
           setSelectedId(id);
         };
@@ -123,18 +141,17 @@ export function App() {
           const r = importSvg(new TextDecoder().decode(f.data));
           add({ name: f.name, kind: 'vector', paths: r.paths, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: 'cut' });
         } else if (ext === 'pdf' || ext === 'ai' || ext === 'eps') {
-          // EPS được Ghostscript chuyển sang PDF (giữ nguyên vector) rồi đọc như PDF
+          // EPS is converted to PDF by Ghostscript (vectors preserved), then read like a PDF
           const pdf = ext === 'eps' ? await window.laser.epsToPdf(f.data) : f.data;
           const pages = await importPdf(pdf);
           pages.forEach((pg, i) => {
-            const base = pages.length > 1 ? `${f.name} (trang ${i + 1})` : f.name;
+            const base = pages.length > 1 ? t('import.page', { name: f.name, n: i + 1 }) : f.name;
             const v = pg.vector;
             if (v.paths.length) add({ name: base, kind: 'vector', paths: v.paths, srcW: v.w, srcH: v.h, w: v.w, h: v.h, layerId: 'cut' });
             if (pg.raster) {
               const r = pg.raster;
-              add({ name: `${base} (ảnh)`, kind: 'bitmap', bitmap: r.bitmap, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: 'image' });
-              if (v.paths.length)
-                g.push(`${base}: có chữ/ảnh không chuyển được thành đường cắt → đã nhập thêm bản ảnh để khắc. Muốn cắt chữ, hãy chuyển chữ thành đường cong (Create Outlines) trong phần mềm thiết kế.`);
+              add({ name: t('import.imageCopy', { name: base }), kind: 'bitmap', bitmap: r.bitmap, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: 'image' });
+              if (v.paths.length) g.push(t('import.pdfTextNote', { name: base }));
             }
           });
         } else {
@@ -142,25 +159,26 @@ export function App() {
           const r = await importRaster(f.data, mime);
           add({ name: f.name, kind: 'bitmap', bitmap: r.bitmap, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: 'image' });
         }
-        g.push(`Đã nhập ${f.name}`);
+        g.push(t('import.done', { name: f.name }));
       } catch (e) {
-        g.push(`Lỗi nhập ${f.name}: ${(e as Error).message}`);
-        if (!given) alert(`Không nhập được ${f.name}:\n${(e as Error).message}`);
+        g.push(t('import.errorLog', { name: f.name, msg: errorText(e) }));
+        if (!given) alert(t('import.errorAlert', { name: f.name, msg: errorText(e) }));
       }
     }
     setBusy('');
   }
 
+  // ---------- Editing ----------
   function addItem(it: Omit<Item, 'id' | 'x' | 'y' | 'copies'>, at?: { x: number; y: number }) {
     const id = uid();
-    setItems((a) => [...a, { ...it, id, x: at?.x ?? 10, y: at?.y ?? 10, copies: { cols: 1, rows: 1, gapX: 5, gapY: 5 } }]);
+    setItems((a) => [...a, { ...it, id, x: at?.x ?? 10, y: at?.y ?? 10, copies: COPIES_1 }]);
     setSelectedId(id);
     return id;
   }
 
   function createDrawn(it: NewItem) {
     const id = uid();
-    setItems((a) => [...a, { ...it, id, copies: { cols: 1, rows: 1, gapX: 5, gapY: 5 } }]);
+    setItems((a) => [...a, { ...it, id, copies: COPIES_1 }]);
     setSelectedId(id);
   }
 
@@ -173,11 +191,11 @@ export function App() {
     }
   }
 
-  /** Nhấp một màu trong bảng màu: gán đối tượng đang chọn vào lớp màu đó (tạo lớp mới nếu chưa có). */
+  /** Palette click: move the selection to that color's layer (creating the layer if needed). */
   function pickColor(color: string) {
     let layer = layers.find((l) => l.color.toLowerCase() === color);
     if (!layer) {
-      layer = { ...baseLayer, id: uid(), name: `Lớp ${layers.length + 1}`, color, mode: 'line', speed: 1000, power: 20 };
+      layer = { ...baseLayer, id: uid(), name: t('layer.new', { n: layers.length + 1 }), color, mode: 'line', speed: 1000, power: 20 };
       const nl = layer;
       setLayers((a) => [...a, nl]);
     }
@@ -187,12 +205,7 @@ export function App() {
       return;
     }
     const bad = selItems.filter((i) => (i.kind === 'bitmap') !== (target.mode === 'image'));
-    if (bad.length)
-      g.push(
-        target.mode === 'image'
-          ? `Lớp "${target.name}" là lớp khắc ảnh — bỏ qua ${bad.length} đối tượng vector`
-          : `Lớp "${target.name}" không phải lớp khắc ảnh — bỏ qua ${bad.length} ảnh (đổi chế độ lớp thành "Khắc ảnh" nếu muốn)`,
-      );
+    if (bad.length) g.push(t(target.mode === 'image' ? 'palette.skipVector' : 'palette.skipImage', { name: target.name, n: bad.length }));
     setItems((a) => a.map((i) => (selSet.has(i.id) && (i.kind === 'bitmap') === (target.mode === 'image') ? { ...i, layerId: target.id } : i)));
     setActiveLayerId(target.id);
   }
@@ -224,17 +237,6 @@ export function App() {
     setSelectedIds(c.map((i) => i.id));
   }
 
-  function traceSelected(opt: TraceOptions) {
-    if (!selected?.bitmap) return;
-    const paths = traceBitmap(selected.bitmap, selected.w, selected.h, opt);
-    if (!paths.length) return alert('Không tìm thấy vùng tối nào — hãy tăng ngưỡng');
-    addItem(
-      { name: `Viền: ${selected.name}`, kind: 'vector', paths, srcW: selected.w, srcH: selected.h, w: selected.w, h: selected.h, layerId: 'cut' },
-      selected,
-    );
-    g.push(`Dò viền được ${paths.length} đường từ ${selected.name}`);
-  }
-
   function duplicateSelected() {
     if (!selItems.length) return;
     const b = selBounds(selItems);
@@ -243,13 +245,26 @@ export function App() {
     setSelectedIds(c.map((i) => i.id));
   }
 
-  async function addText(t: { text: string; font: string; size: number; align: TextAlign; layerId: string }, at?: Pt) {
-    const r = await textToPaths(t.text, t.font, t.size, t.align);
-    addItem({ name: `Chữ: ${t.text.split('\n')[0].slice(0, 20)}`, kind: 'vector', paths: r.paths, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: t.layerId }, at);
+  function traceSelected(opt: TraceOptions) {
+    if (!selected?.bitmap) return;
+    const paths = traceBitmap(selected.bitmap, selected.w, selected.h, opt);
+    if (!paths.length) return alert(t('trace.none'));
+    addItem(
+      { name: t('trace.name', { name: selected.name }), kind: 'vector', paths, srcW: selected.w, srcH: selected.h, w: selected.w, h: selected.h, layerId: 'cut' },
+      selected,
+    );
+    g.push(t('trace.done', { n: paths.length, name: selected.name }));
   }
 
+  async function addText(spec: { text: string; font: string; size: number; align: TextAlign; layerId: string }, at?: Pt) {
+    const r = await textToPaths(spec.text, spec.font, spec.size, spec.align);
+    const name = t('text.itemName', { text: spec.text.split('\n')[0].slice(0, 20) });
+    addItem({ name, kind: 'vector', paths: r.paths, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: spec.layerId }, at);
+  }
+
+  // ---------- Project files ----------
   async function saveProject() {
-    await window.laser.saveText('du-an.lzr', serializeProject(items, layers), 'project');
+    await window.laser.saveText(t('project.defaultName'), serializeProject(items, layers), 'project');
   }
 
   async function openProject() {
@@ -260,13 +275,13 @@ export function App() {
       hist.reset(p.items);
       setLayers(p.layers);
       setSelectedId(null);
-      g.push(`Đã mở dự án ${f.name}`);
+      g.push(t('project.opened', { name: f.name }));
     } catch (e) {
-      alert(`Không mở được dự án: ${(e as Error).message}`);
+      alert(t('project.openFailed', { msg: errorText(e) }));
     }
   }
 
-  // Phím tắt kiểu phần mềm thiết kế
+  // ---------- Keyboard shortcuts (design-app style) ----------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
@@ -308,8 +323,9 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // Móc kiểm thử dùng cho chế độ chụp màn hình tự động
+  // ---------- Test hooks used by the automated snapshot mode (LASER_ACTIONS) ----------
   (window as any).__laserAction = async (name: string, ...args: any[]) => {
+    if (name === 'lang') setLang(args[0]);
     if (name === 'select') setSelectedId(items[args[0]]?.id ?? null);
     if (name === 'preview') setShowPreview(!!args[0]);
     if (name === 'rotate') applyTransform(args[0], args[1], args[2]);
@@ -318,7 +334,7 @@ export function App() {
     if (name === 'move') setItems((a) => a.map((i, k) => (k === args[0] ? { ...i, x: args[1], y: args[2] } : i)));
     if (name === 'tool') setTool(args[0]);
     if (name === 'mouse') {
-      // args[0]: danh sách [loại, x_mm, y_mm, {shiftKey, detail...}]
+      // args[0]: list of [eventType, x_mm, y_mm, {shiftKey, detail, ...}]
       const cvEl = document.querySelector('.workspace canvas')!;
       for (const [type, x, y, opt] of args[0] as [string, number, number, any][]) {
         const [cx, cy] = (window as any).__wsClient(x, y);
@@ -339,23 +355,25 @@ export function App() {
       return p.items.length;
     }
     if (name === 'fonts') return (await window.laser.listFonts()).slice(0, 3);
-    return items.map((i) => `${i.name} | ${i.kind} ${i.w.toFixed(1)}x${i.h.toFixed(1)} @${i.x.toFixed(1)},${i.y.toFixed(1)} paths=${i.paths?.length ?? 0} layer=${layers.find((l) => l.id === i.layerId)?.name}`).join('\n');
+    return items
+      .map((i) => `${i.name} | ${i.kind} ${i.w.toFixed(1)}x${i.h.toFixed(1)} @${i.x.toFixed(1)},${i.y.toFixed(1)} paths=${i.paths?.length ?? 0} layer=${layers.find((l) => l.id === i.layerId)?.name}`)
+      .join('\n');
   };
-  // Móc kiểm thử: cho phép tiến trình chính nạp file mẫu khi chụp màn hình tự động
   (window as any).__laserImport = (files: { name: string; b64: string }[], preview = true) => {
     setShowPreview(preview);
     return importFiles(files.map((f) => ({ name: f.name, data: Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0)) })));
   };
   (window as any).__laserGcode = () => generateJob(items, layers, machine, jobOpt).lines.join('\n');
-  (window as any).__laserSetCopies = (cols: number, rows: number) =>
-    setItems((a) => a.map((i, k) => (k === 0 ? { ...i, copies: { ...i.copies, cols, rows } } : i)));
+  (window as any).__laserSetCopies = (cols: number, rows: number) => setItems((a) => a.map((i, k) => (k === 0 ? { ...i, copies: { ...i.copies, cols, rows } } : i)));
 
+  // ---------- Running jobs ----------
   function buildJob() {
-    if (items.length === 0) throw new Error('Chưa có đối tượng nào');
+    if (items.length === 0) throw new Error(t('job.empty'));
     const b = jobBounds(items, jobOpt);
-    if (b.minX < -0.01 || b.minY < -0.01 || b.maxX > machine.bedW + 0.01 || b.maxY > machine.bedH + 0.01)
-      if (!confirm(`Vùng cắt (${b.minX.toFixed(1)},${b.minY.toFixed(1)}) → (${b.maxX.toFixed(1)},${b.maxY.toFixed(1)}) vượt ra ngoài bàn máy ${machine.bedW}×${machine.bedH} mm. Vẫn tiếp tục?`))
-        return null;
+    if (b.minX < -0.01 || b.minY < -0.01 || b.maxX > machine.bedW + 0.01 || b.maxY > machine.bedH + 0.01) {
+      const msg = t('job.outOfBed', { x0: b.minX.toFixed(1), y0: b.minY.toFixed(1), x1: b.maxX.toFixed(1), y1: b.maxY.toFixed(1), w: machine.bedW, h: machine.bedH });
+      if (!confirm(msg)) return null;
+    }
     return generateJob(items, layers, machine, jobOpt);
   }
 
@@ -364,7 +382,7 @@ export function App() {
       const j = buildJob();
       if (j) await window.laser.saveText('job.gcode', j.lines.join('\n') + '\n');
     } catch (e) {
-      alert((e as Error).message);
+      alert(errorText(e));
     }
   }
 
@@ -372,48 +390,62 @@ export function App() {
     try {
       const j = buildJob();
       if (!j) return;
-      if (!confirm(`Bắt đầu chạy ${j.lines.length} dòng lệnh (ước tính ${fmtTime(j.seconds)})?\nHãy đeo kính bảo hộ và kiểm tra phôi.`)) return;
+      if (!confirm(t('job.confirmStart', { n: j.lines.length, time: fmtTime(j.seconds) }))) return;
       await window.laser.run(j.lines);
     } catch (e) {
-      alert((e as Error).message);
+      alert(errorText(e));
     }
   }
 
   async function runFrame() {
     const lines = frameGcode(items, machine, jobOpt);
-    if (!lines.length) return alert('Chưa có đối tượng nào để chạy khung');
+    if (!lines.length) return alert(t('frame.empty'));
     await g.send(lines);
   }
 
-  const jog = (dx: number, dy: number, step: number, feed: number) =>
-    g.send(`$J=G91 G21 X${(dx * step).toFixed(3)} Y${(dy * step).toFixed(3)} F${feed}`);
+  const jog = (dx: number, dy: number, step: number, feed: number) => g.send(`$J=G91 G21 X${(dx * step).toFixed(3)} Y${(dy * step).toFixed(3)} F${feed}`);
 
   return (
     <div className="app">
       <header className="toolbar">
-        <strong className="brand">⚡ Laser Tool</strong>
-        <button onClick={openProject} title="Mở dự án .lzr">📁 Mở</button>
-        <button onClick={saveProject} disabled={!items.length} title="Lưu dự án .lzr">💾 Lưu dự án</button>
-        <button onClick={() => importFiles()}>📥 Nhập file</button>
+        <strong className="brand">⚡ {t('app.name')}</strong>
+        <button onClick={openProject} title={t('tb.openTip')}>📁 {t('tb.open')}</button>
+        <button onClick={saveProject} disabled={!items.length} title={t('tb.saveTip')}>
+          💾 {t('tb.save')}
+        </button>
+        <button onClick={() => importFiles()} title={t('tb.importTip')}>
+          📥 {t('tb.import')}
+        </button>
         <span className="sep" />
-        <button onClick={hist.undo} disabled={!hist.canUndo} title="Hoàn tác (Ctrl+Z)">↶</button>
-        <button onClick={hist.redo} disabled={!hist.canRedo} title="Làm lại (Ctrl+Y)">↷</button>
-        <button onClick={duplicateSelected} disabled={!selItems.length} title="Nhân đôi (Ctrl+D)">⧉</button>
-        <button onClick={deleteSelected} disabled={!selItems.length} title="Xóa (Delete)">🗑</button>
+        <button onClick={hist.undo} disabled={!hist.canUndo} title={t('tb.undo')}>↶</button>
+        <button onClick={hist.redo} disabled={!hist.canRedo} title={t('tb.redo')}>↷</button>
+        <button onClick={duplicateSelected} disabled={!selItems.length} title={t('tb.duplicate')}>⧉</button>
+        <button onClick={deleteSelected} disabled={!selItems.length} title={t('tb.delete')}>🗑</button>
         <span className="sep" />
         <label className="chk">
-          <input type="checkbox" checked={showPreview} onChange={(e) => setShowPreview(e.target.checked)} /> Xem đường chạy
+          <input type="checkbox" checked={showPreview} onChange={(e) => setShowPreview(e.target.checked)} /> {t('tb.preview')}
         </label>
-        {job && <span className="muted">≈ {fmtTime(job.seconds)} · {job.lines.length} dòng</span>}
+        {job && <span className="muted">{t('tb.estimate', { time: fmtTime(job.seconds), n: job.lines.length })}</span>}
         <span className="spacer" />
-        <button onClick={exportGcode} disabled={!items.length}>⤓ Xuất G-code</button>
-        <button className="warn" onClick={runFrame} disabled={!g.connected || running || !items.length} title="Chạy khung bao vùng cắt với công suất thấp">
-          ⬚ Chạy khung
+        <button onClick={exportGcode} disabled={!items.length}>⤓ {t('tb.export')}</button>
+        <button className="warn" onClick={runFrame} disabled={!g.connected || running || !items.length} title={t('tb.frameTip')}>
+          ⬚ {t('tb.frame')}
         </button>
-        <button className="go" onClick={startJob} disabled={!g.connected || running || !items.length}>▶ Bắt đầu</button>
-        {running && !g.progress?.paused && <button onClick={() => window.laser.pause()}>⏸ Tạm dừng</button>}
-        {running && g.progress?.paused && <button onClick={() => window.laser.resume()}>⏵ Tiếp tục</button>}
-        <button className="stop" onClick={() => window.laser.abort()} disabled={!g.connected}>■ DỪNG</button>
+        <button className="go" onClick={startJob} disabled={!g.connected || running || !items.length}>
+          ▶ {t('tb.start')}
+        </button>
+        {running && !g.progress?.paused && <button onClick={() => window.laser.pause()}>⏸ {t('tb.pause')}</button>}
+        {running && g.progress?.paused && <button onClick={() => window.laser.resume()}>⏵ {t('tb.resume')}</button>}
+        <button className="stop" onClick={() => window.laser.abort()} disabled={!g.connected}>
+          ■ {t('tb.stop')}
+        </button>
+        <select className="lang" value={lang} title={t('lang.label')} onChange={(e) => setLang(e.target.value as Lang)}>
+          {LANGS.map((l) => (
+            <option key={l.id} value={l.id}>
+              🌐 {l.name}
+            </option>
+          ))}
+        </select>
       </header>
 
       <main className="main">
@@ -447,7 +479,7 @@ export function App() {
           <JogPanel g={g} jog={jog} disabled={!g.connected || running} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
           {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} />}
-          <LayersPanel layers={layers} patch={patchLayer} reset={() => setLayers(DEFAULT_LAYERS)} />
+          <LayersPanel layers={layers} patch={patchLayer} reset={() => setLayers(defaultLayers())} />
         </aside>
       </main>
 
@@ -456,26 +488,26 @@ export function App() {
           layers={layers}
           defaultLayerId={activeLayer.mode !== 'image' ? activeLayer.id : undefined}
           onClose={() => setTextAt(null)}
-          onOk={async (t) => {
+          onOk={async (spec) => {
             try {
-              await addText(t, textAt);
+              await addText(spec, textAt);
               setTextAt(null);
               setTool('select');
             } catch (e) {
-              alert((e as Error).message);
+              alert(errorText(e));
             }
           }}
         />
       )}
 
       <footer className="status">
-        <span className={`dot ${g.connected ? 'on' : ''}`} /> {g.connected ? g.status.state : 'Chưa kết nối'}
+        <span className={`dot ${g.connected ? 'on' : ''}`} /> {g.connected ? g.status.state : t('status.disconnected')}
         <span>X {g.status.wpos.x.toFixed(2)}</span>
         <span>Y {g.status.wpos.y.toFixed(2)}</span>
         {g.progress && g.progress.total > 0 && (
           <span>
-            Tiến độ: {Math.round((100 * g.progress.acked) / g.progress.total)}% ({g.progress.acked}/{g.progress.total})
-            {g.progress.errors > 0 && ` · ${g.progress.errors} lỗi`}
+            {t('status.progress', { pct: Math.round((100 * g.progress.acked) / g.progress.total), done: g.progress.acked, total: g.progress.total })}
+            {g.progress.errors > 0 && t('status.errors', { n: g.progress.errors })}
           </span>
         )}
         {busy && <span>{busy}</span>}
@@ -483,328 +515,5 @@ export function App() {
         <span className="muted">{g.version}</span>
       </footer>
     </div>
-  );
-}
-
-type G = ReturnType<typeof useGrbl>;
-
-function ConnectionPanel({ g, machine, setMachine }: { g: G; machine: MachineProfile; setMachine: (m: MachineProfile) => void }) {
-  const [ports, setPorts] = useState<PortInfo[]>([]);
-  const [port, setPort] = useState('');
-  const [cmd, setCmd] = useState('');
-  const refresh = async () => {
-    const l = await window.laser.listPorts();
-    setPorts(l);
-    if (!port && l.length) setPort(l[0].path);
-  };
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return (
-    <section className="panel">
-      <h3>Kết nối máy</h3>
-      <div className="row">
-        <select value={port} onChange={(e) => setPort(e.target.value)} disabled={g.connected}>
-          {ports.length === 0 && <option value="">(không thấy cổng COM)</option>}
-          {ports.map((p) => (
-            <option key={p.path} value={p.path}>
-              {p.path} {p.friendlyName || p.manufacturer}
-            </option>
-          ))}
-        </select>
-        <button onClick={refresh} disabled={g.connected} title="Quét lại cổng">⟳</button>
-      </div>
-      <div className="row">
-        <select value={machine.baud} onChange={(e) => setMachine({ ...machine, baud: +e.target.value })} disabled={g.connected}>
-          {[115200, 250000, 57600, 9600].map((b) => (
-            <option key={b}>{b}</option>
-          ))}
-        </select>
-        {g.connected ? (
-          <button onClick={g.disconnect}>Ngắt kết nối</button>
-        ) : (
-          <button className="go" disabled={!port} onClick={() => g.connect(port, machine.baud).catch((e) => alert(`Không mở được cổng: ${e.message}`))}>
-            Kết nối
-          </button>
-        )}
-      </div>
-      <div className="console">
-        {g.log.slice(-80).reverse().map((l, i) => (
-          <div key={i} className={l.startsWith('error') || l.startsWith('ALARM') ? 'err' : l.startsWith('>') ? 'out' : ''}>
-            {l}
-          </div>
-        ))}
-      </div>
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (cmd.trim()) g.send(cmd.trim());
-          setCmd('');
-        }}
-      >
-        <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="Gõ lệnh G-code / $$ …" disabled={!g.connected} />
-        <button disabled={!g.connected}>Gửi</button>
-      </form>
-    </section>
-  );
-}
-
-function JogPanel({ g, jog, disabled }: { g: G; jog: (dx: number, dy: number, step: number, feed: number) => void; disabled: boolean }) {
-  const [step, setStep] = useState(10);
-  const [feed, setFeed] = useState(3000);
-  const [firing, setFiring] = useState(false);
-  const fire = async () => {
-    if (firing) {
-      await g.send(['M5 S0']);
-      setFiring(false);
-    } else {
-      // Bật tia rất yếu (1%) để nhìn vị trí — không để lâu một chỗ
-      await g.send(['M3 S10', 'G1 F1000']);
-      setFiring(true);
-    }
-  };
-  return (
-    <section className="panel">
-      <h3>Điều khiển & gốc tọa độ</h3>
-      <div className="jog">
-        <span />
-        <button disabled={disabled} onClick={() => jog(0, 1, step, feed)}>▲ Y+</button>
-        <span />
-        <button disabled={disabled} onClick={() => jog(-1, 0, step, feed)}>◀ X−</button>
-        <button disabled={disabled} onClick={() => g.send('G90 G0 X0 Y0')} title="Về gốc làm việc">⌂</button>
-        <button disabled={disabled} onClick={() => jog(1, 0, step, feed)}>X+ ▶</button>
-        <span />
-        <button disabled={disabled} onClick={() => jog(0, -1, step, feed)}>▼ Y−</button>
-        <span />
-      </div>
-      <div className="row">
-        <label>Bước</label>
-        {[0.1, 1, 10, 50].map((s) => (
-          <button key={s} className={s === step ? 'sel' : ''} onClick={() => setStep(s)}>
-            {s}
-          </button>
-        ))}
-      </div>
-      <div className="row">
-        <label>Tốc độ jog</label>
-        <input type="number" value={feed} onChange={(e) => setFeed(+e.target.value)} />
-      </div>
-      <div className="row wrap">
-        <button disabled={disabled} onClick={() => g.send('G10 L20 P1 X0 Y0')} title="Lấy vị trí hiện tại của đầu laser làm gốc (0,0)">
-          📍 Đặt gốc tại đây
-        </button>
-        <button disabled={disabled} onClick={() => g.send('$H')} title="Chạy về công tắc hành trình (nếu máy có lắp)">Homing</button>
-        <button disabled={!g.connected} onClick={() => g.send('$X')} title="Mở khóa sau báo động">Mở khóa $X</button>
-        <button disabled={disabled} className={firing ? 'warn' : ''} onClick={fire} title="Bật tia công suất 1% để căn chỉnh">
-          {firing ? '🔴 Tắt tia' : '🔆 Bắn tia 1%'}
-        </button>
-      </div>
-    </section>
-  );
-}
-
-const ANCHORS: Anchor[] = ['tl', 't', 'tr', 'l', 'c', 'r', 'bl', 'b', 'br'];
-
-function JobPanel(p: {
-  originMode: OriginMode;
-  setOriginMode: (m: OriginMode) => void;
-  anchor: Anchor;
-  setAnchor: (a: Anchor) => void;
-  machine: MachineProfile;
-  setMachine: (m: MachineProfile) => void;
-}) {
-  const m = p.machine;
-  return (
-    <section className="panel">
-      <h3>Công việc</h3>
-      <div className="row">
-        <select value={p.originMode} onChange={(e) => p.setOriginMode(e.target.value as OriginMode)}>
-          <option value="absolute">Theo gốc làm việc (vị trí trên bàn)</option>
-          <option value="current">Từ vị trí đầu laser hiện tại</option>
-        </select>
-      </div>
-      {p.originMode === 'current' && (
-        <div className="row">
-          <label>Điểm neo</label>
-          <div className="anchors">
-            {ANCHORS.map((a) => (
-              <button key={a} className={a === p.anchor ? 'sel' : ''} onClick={() => p.setAnchor(a)} />
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="grid2">
-        <label>Tốc độ chạy khung</label>
-        <input type="number" value={m.frameSpeed} onChange={(e) => p.setMachine({ ...m, frameSpeed: +e.target.value })} />
-        <label>Công suất khung (%)</label>
-        <input type="number" step={0.5} min={0} max={5} value={m.framePower} onChange={(e) => p.setMachine({ ...m, framePower: Math.min(5, +e.target.value) })} />
-        <label>Bàn máy W×H (mm)</label>
-        <div className="row">
-          <input type="number" value={m.bedW} onChange={(e) => p.setMachine({ ...m, bedW: +e.target.value })} />
-          <input type="number" value={m.bedH} onChange={(e) => p.setMachine({ ...m, bedH: +e.target.value })} />
-        </div>
-        <label>S max ($30)</label>
-        <input type="number" value={m.sMax} onChange={(e) => p.setMachine({ ...m, sMax: +e.target.value })} />
-      </div>
-    </section>
-  );
-}
-
-function ItemPanel({
-  item,
-  layers,
-  patch,
-  onTrace,
-}: {
-  item: Item;
-  layers: Layer[];
-  patch: (p: Partial<Item>) => void;
-  onTrace: (o: TraceOptions) => void;
-}) {
-  const [th, setTh] = useState(128);
-  const [smooth, setSmooth] = useState(0.8);
-  /** Đổi thông số hình (bo góc, số cạnh) → vẽ lại đường theo kích thước hiện tại */
-  const reshape = (spec: NonNullable<Item['shape']>) => {
-    const paths = shapePaths(spec, item.w, item.h);
-    if (paths) patch({ shape: spec, paths, srcW: item.w, srcH: item.h });
-  };
-  return (
-    <section className="panel">
-      <h3 title={item.name}>Đối tượng: {item.name}</h3>
-      <div className="row">
-        <label>Tên</label>
-        <input value={item.name} onChange={(e) => patch({ name: e.target.value })} />
-      </div>
-      <div className="row">
-        <label>Lớp</label>
-        <select value={item.layerId} onChange={(e) => patch({ layerId: e.target.value })}>
-          {layers
-            .filter((l) => (item.kind === 'bitmap') === (l.mode === 'image'))
-            .map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-        </select>
-      </div>
-      <div className="row">
-        <button onClick={() => patch({ w: item.srcW, h: item.srcH })}>Về cỡ gốc</button>
-      </div>
-      {item.shape?.type === 'rect' && (
-        <div className="row">
-          <label>Bo góc (mm)</label>
-          <NumField value={item.shape.radius ?? 0} min={0} step={0.5} onCommit={(v) => reshape({ type: 'rect', radius: v })} />
-        </div>
-      )}
-      {item.shape?.type === 'polygon' && (
-        <div className="row">
-          <label>Số cạnh</label>
-          <NumField value={item.shape.sides ?? 6} min={3} step={1} onCommit={(v) => reshape({ type: 'polygon', sides: Math.round(v) })} />
-        </div>
-      )}
-      {item.kind === 'bitmap' && (
-        <>
-          <h4>Dò viền ảnh → đường cắt</h4>
-          <div className="row">
-            <label>Ngưỡng</label>
-            <input type="range" min={1} max={254} value={th} onChange={(e) => setTh(+e.target.value)} />
-            <span className="muted">{th}</span>
-          </div>
-          <div className="row">
-            <label>Làm mượt</label>
-            <input type="range" min={0} max={3} step={0.1} value={smooth} onChange={(e) => setSmooth(+e.target.value)} />
-            <span className="muted">{smooth}</span>
-          </div>
-          <button onClick={() => onTrace({ threshold: th, minArea: 0.5, smooth })}>✎ Dò viền</button>
-        </>
-      )}
-      <h4>Nhân bản (cắt nhiều sản phẩm)</h4>
-      <div className="grid4">
-        <label>Cột</label>
-        <input type="number" min={1} value={item.copies.cols} onChange={(e) => patch({ copies: { ...item.copies, cols: Math.max(1, Math.floor(+e.target.value)) } })} />
-        <label>Hàng</label>
-        <input type="number" min={1} value={item.copies.rows} onChange={(e) => patch({ copies: { ...item.copies, rows: Math.max(1, Math.floor(+e.target.value)) } })} />
-        <label>Cách X</label>
-        <input type="number" step={0.5} value={item.copies.gapX} onChange={(e) => patch({ copies: { ...item.copies, gapX: +e.target.value } })} />
-        <label>Cách Y</label>
-        <input type="number" step={0.5} value={item.copies.gapY} onChange={(e) => patch({ copies: { ...item.copies, gapY: +e.target.value } })} />
-      </div>
-      <div className="muted">Tổng: {item.copies.cols * item.copies.rows} sản phẩm</div>
-    </section>
-  );
-}
-
-function LayersPanel({ layers, patch, reset }: { layers: Layer[]; patch: (id: string, p: Partial<Layer>) => void; reset: () => void }) {
-  const [open, setOpen] = useState<string | null>('cut');
-  return (
-    <section className="panel">
-      <h3>
-        Lớp gia công <button className="tiny" onClick={reset}>Mặc định</button>
-      </h3>
-      {layers.map((l) => (
-        <div key={l.id} className="layer">
-          <div className="layer-head" onClick={() => setOpen(open === l.id ? null : l.id)}>
-            <input type="checkbox" checked={l.enabled} onClick={(e) => e.stopPropagation()} onChange={(e) => patch(l.id, { enabled: e.target.checked })} />
-            <span className="swatch" style={{ background: l.color }} />
-            <b>{l.name}</b>
-            <span className="muted">
-              {l.speed} mm/ph · {l.power}% · x{l.passes}
-            </span>
-          </div>
-          {open === l.id && (
-            <div className="grid2">
-              <label>Tên</label>
-              <input value={l.name} onChange={(e) => patch(l.id, { name: e.target.value })} />
-              <label>Chế độ</label>
-              <select value={l.mode} onChange={(e) => patch(l.id, { mode: e.target.value as Layer['mode'] })}>
-                <option value="line">Cắt / vạch theo nét</option>
-                <option value="fill">Khắc tô kín vector</option>
-                <option value="image">Khắc ảnh</option>
-              </select>
-              <label>Tốc độ (mm/ph)</label>
-              <input type="number" value={l.speed} onChange={(e) => patch(l.id, { speed: Math.max(1, +e.target.value) })} />
-              <label>Công suất (%)</label>
-              <input type="number" min={0} max={100} value={l.power} onChange={(e) => patch(l.id, { power: Math.min(100, Math.max(0, +e.target.value)) })} />
-              <label>Số lượt</label>
-              <input type="number" min={1} value={l.passes} onChange={(e) => patch(l.id, { passes: Math.max(1, Math.floor(+e.target.value)) })} />
-              {l.mode !== 'line' && (
-                <>
-                  <label>Khoảng dòng (mm)</label>
-                  <input type="number" step={0.01} min={0.03} value={l.lineInterval} onChange={(e) => patch(l.id, { lineInterval: Math.max(0.03, +e.target.value) })} />
-                  <label>Đi quá biên (mm)</label>
-                  <input type="number" step={0.5} min={0} value={l.overscan} onChange={(e) => patch(l.id, { overscan: Math.max(0, +e.target.value) })} />
-                  <label>Quét 2 chiều</label>
-                  <input type="checkbox" checked={l.bidirectional} onChange={(e) => patch(l.id, { bidirectional: e.target.checked })} />
-                </>
-              )}
-              {l.mode === 'image' && (
-                <>
-                  <label>Xử lý ảnh</label>
-                  <select value={l.dither} onChange={(e) => patch(l.id, { dither: e.target.value as Layer['dither'] })}>
-                    <option value="floyd">Floyd–Steinberg (chấm)</option>
-                    <option value="threshold">Đen trắng (ngưỡng)</option>
-                    <option value="grayscale">Thang xám (đổi công suất)</option>
-                  </select>
-                  {l.dither === 'threshold' && (
-                    <>
-                      <label>Ngưỡng</label>
-                      <input type="range" min={1} max={254} value={l.threshold} onChange={(e) => patch(l.id, { threshold: +e.target.value })} />
-                    </>
-                  )}
-                  {l.dither === 'grayscale' && (
-                    <>
-                      <label>Công suất min (%)</label>
-                      <input type="number" min={0} max={l.power} value={l.minPower} onChange={(e) => patch(l.id, { minPower: +e.target.value })} />
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-    </section>
   );
 }

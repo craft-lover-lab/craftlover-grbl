@@ -2,6 +2,7 @@ import opentype from 'opentype.js';
 import type { Polyline, Pt } from '../core/types';
 import { cubic, quad } from './svgPath';
 import { pathsBounds, isEmpty } from '../core/geometry';
+import { t } from '../i18n';
 
 const fontCache = new Map<string, opentype.Font>();
 
@@ -72,7 +73,7 @@ export async function textToPaths(text: string, fontFile: string, size: number, 
     flush();
   });
   const b = pathsBounds(out);
-  if (isEmpty(b)) throw new Error('Font này không có ký tự cho nội dung đã nhập');
+  if (isEmpty(b)) throw new Error(t('err.fontNoGlyphs'));
   return {
     paths: out.map((pl) => pl.map((q) => ({ x: q.x - b.minX, y: q.y - b.minY }))),
     w: b.maxX - b.minX,

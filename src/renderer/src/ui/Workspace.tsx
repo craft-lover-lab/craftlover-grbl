@@ -3,6 +3,7 @@ import type { Bounds, Item, Layer, Polyline, Pt } from '../core/types';
 import { copyOffsets, isEmpty, itemBounds, placedPaths, pathsBounds } from '../core/geometry';
 import { regularPolygonBox, shapePaths } from '../core/shapes';
 import { hitItem, itemTouchesRect, moveItems, rotateItems, scaleItems, selBounds } from './designOps';
+import { t, type Key } from '../i18n';
 
 export type Tool = 'select' | 'line' | 'rect' | 'ellipse' | 'polygon' | 'text';
 
@@ -117,7 +118,7 @@ export function Workspace(p: Props) {
     const w = b.maxX - b.minX;
     const h = b.maxY - b.minY;
     p.onCreate({
-      name: close ? 'Đa giác' : 'Đường',
+      name: t(close ? 'shape.closed' : 'shape.line'),
       kind: 'vector',
       shape: { type: 'line' },
       paths: [pts.map((q) => ({ x: q.x - b.minX, y: q.y - b.minY }))],
@@ -595,7 +596,7 @@ export function Workspace(p: Props) {
       const box = shapeBox(d.start, q, e.shiftKey || poly, poly || e.ctrlKey);
       if (box.w < 0.3 || box.h < 0.3) return;
       const spec = p.tool === 'rect' ? { type: 'rect' as const, radius: 0 } : poly ? { type: 'polygon' as const, sides: p.polygonSides } : { type: 'ellipse' as const };
-      const names = { rect: 'Hình chữ nhật', ellipse: 'Elip', polygon: `Đa giác ${p.polygonSides} cạnh` } as const;
+      const names = { rect: t('shape.rect'), ellipse: t('shape.ellipse'), polygon: t('shape.polygon', { n: p.polygonSides }) };
       p.onCreate({
         name: names[spec.type],
         kind: 'vector',
@@ -636,13 +637,13 @@ export function Workspace(p: Props) {
   };
 
   const cursorStyle = space || drag.current?.kind === 'pan' ? 'grab' : p.tool === 'select' ? 'default' : p.tool === 'text' ? 'text' : 'crosshair';
-  const hints: Record<Tool, string> = {
-    select: 'Nhấp: chọn · Shift/Ctrl+nhấp: thêm bớt · Kéo nền trái→phải: chọn trọn, phải→trái: chọn chạm · Chuột phải/giữa hoặc Space+kéo: cuộn',
-    line: 'Nhấp để thêm điểm · Nhấp đúp hoặc Enter: kết thúc · Nhấp điểm đầu: khép kín · Shift: góc 15° · Backspace: xóa điểm · Esc: hủy',
-    rect: 'Kéo để vẽ · Shift: hình vuông · Ctrl: vẽ từ tâm · Alt: tắt bắt dính lưới',
-    ellipse: 'Kéo để vẽ · Shift: hình tròn · Ctrl: vẽ từ tâm · Alt: tắt bắt dính lưới',
-    polygon: 'Kéo từ tâm ra để vẽ đa giác đều',
-    text: 'Nhấp vào vị trí muốn đặt chữ',
+  const hintKey: Record<Tool, Key> = {
+    select: 'hint.select',
+    line: 'hint.line',
+    rect: 'hint.rect',
+    ellipse: 'hint.ellipse',
+    polygon: 'hint.polygon',
+    text: 'hint.text',
   };
 
   return (
@@ -660,10 +661,10 @@ export function Workspace(p: Props) {
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
       />
-      <div className="ws-hint">{hints[p.tool]}</div>
+      <div className="ws-hint">{t(hintKey[p.tool])}</div>
       <div className="ws-coords">
         {cursor ? `X ${cursor.x.toFixed(2)}  Y ${cursor.y.toFixed(2)} mm` : ''}
-        <button className="tiny" onClick={fit} title="Xem toàn bộ bàn máy">⤢ Vừa khung</button>
+        <button className="tiny" onClick={fit} title={t('ws.fitTip')}>⤢ {t('ws.fit')}</button>
       </div>
     </div>
   );

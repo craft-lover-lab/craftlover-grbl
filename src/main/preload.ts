@@ -22,6 +22,7 @@ const api = {
   epsToPdf: (data: Uint8Array) => ipcRenderer.invoke('convert:eps', data),
   listFonts: () => ipcRenderer.invoke('font:list'),
   readFont: (file: string) => ipcRenderer.invoke('font:read', file),
+  setLang: (lang: string) => ipcRenderer.invoke('app:setLang', lang),
   onLine: (cb: (l: string) => void) => on('grbl:line', cb),
   onProgress: (cb: (p: unknown) => void) => on('grbl:progress', cb),
   onClosed: (cb: () => void) => on('grbl:closed', cb),

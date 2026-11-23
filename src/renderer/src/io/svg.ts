@@ -1,6 +1,7 @@
 import type { Polyline } from '../core/types';
 import { parsePathData } from './svgPath';
 import { pathsBounds, isEmpty } from '../core/geometry';
+import { t } from '../i18n';
 
 const UNIT_MM: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: 25.4 / 96, '': 25.4 / 96 };
 
@@ -80,7 +81,7 @@ export function importSvg(text: string): { paths: Polyline[]; w: number; h: numb
   host.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden';
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
   const parsed = doc.querySelector('svg');
-  if (!parsed || doc.querySelector('parsererror')) throw new Error('File SVG không hợp lệ');
+  if (!parsed || doc.querySelector('parsererror')) throw new Error(t('err.svgInvalid'));
   // Loại bỏ mọi nội dung có thể thực thi trước khi gắn vào trang
   parsed.querySelectorAll('script, foreignObject, image, iframe').forEach((e) => e.remove());
   [parsed, ...Array.from(parsed.querySelectorAll('*'))].forEach((e) => {
@@ -123,7 +124,7 @@ export function importSvg(text: string): { paths: Polyline[]; w: number; h: numb
     };
     for (const c of Array.from(svg.children)) walk(c, false);
     const b = pathsBounds(paths);
-    if (isEmpty(b)) throw new Error('SVG không có đường vector nào (chữ cần được chuyển thành đường – Object to Path)');
+    if (isEmpty(b)) throw new Error(t('err.svgEmpty'));
     const norm = paths.map((pl) => pl.map((p) => ({ x: p.x - b.minX, y: p.y - b.minY })));
     return { paths: norm, w: b.maxX - b.minX, h: b.maxY - b.minY };
   } finally {

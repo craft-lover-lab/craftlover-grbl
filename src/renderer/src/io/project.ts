@@ -1,5 +1,6 @@
 import type { Item, Layer } from '../core/types';
 import { grayToUrl } from './image';
+import { t } from '../i18n';
 
 const VERSION = 1;
 
@@ -25,11 +26,11 @@ export function serializeProject(items: Item[], layers: Layer[]): string {
 
 export function parseProject(text: string): { items: Item[]; layers: Layer[] } {
   const d = JSON.parse(text);
-  if (d.app !== 'laser-tool' || !Array.isArray(d.items) || !Array.isArray(d.layers)) throw new Error('Không phải file dự án Laser Tool');
+  if (d.app !== 'laser-tool' || !Array.isArray(d.items) || !Array.isArray(d.layers)) throw new Error(t('err.notProject'));
   const items: Item[] = d.items.map((it: any) => {
     if (!it.bitmap) return it;
     const gray = fromB64(it.bitmap.gray);
-    if (gray.length !== it.bitmap.width * it.bitmap.height) throw new Error(`Ảnh của "${it.name}" bị hỏng`);
+    if (gray.length !== it.bitmap.width * it.bitmap.height) throw new Error(t('err.imageBroken', { name: it.name }));
     return { ...it, bitmap: { width: it.bitmap.width, height: it.bitmap.height, gray, url: grayToUrl(gray, it.bitmap.width, it.bitmap.height) } };
   });
   return { items, layers: d.layers };

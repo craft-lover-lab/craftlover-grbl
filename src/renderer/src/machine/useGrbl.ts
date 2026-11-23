@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Pt } from '../core/types';
+import { t, type Key } from '../i18n';
 
 export interface PortInfo {
   path: string;
@@ -42,6 +43,7 @@ declare global {
       epsToPdf(data: Uint8Array): Promise<Uint8Array>;
       listFonts(): Promise<{ name: string; file: string }[]>;
       readFont(file: string): Promise<Uint8Array>;
+      setLang(lang: string): Promise<void>;
       onLine(cb: (l: string) => void): () => void;
       onProgress(cb: (p: JobProgress) => void): () => void;
       onClosed(cb: () => void): () => void;
@@ -49,13 +51,8 @@ declare global {
   }
 }
 
-const ALARMS: Record<string, string> = {
-  '1': 'Chạm công tắc hành trình (hard limit) — cần Homing lại',
-  '2': 'Lệnh vượt quá vùng làm việc (soft limit)',
-  '3': 'Bị reset khi đang chạy — vị trí có thể đã mất',
-  '8': 'Homing thất bại: không rời được công tắc',
-  '9': 'Homing thất bại: không tìm thấy công tắc',
-};
+/** GRBL alarm codes that get a human-readable explanation in the console. */
+const ALARMS = new Set(['1', '2', '3', '8', '9']);
 
 export function useGrbl() {
   const [connected, setConnected] = useState(false);
@@ -76,12 +73,12 @@ export function useGrbl() {
       }
       if (/^Grbl|^GrblHAL/i.test(line)) setVersion(line);
       const am = line.match(/^ALARM:(\d+)/);
-      push(am && ALARMS[am[1]] ? `${line}  ← ${ALARMS[am[1]]}` : line);
+      push(am && ALARMS.has(am[1]) ? `${line}  ← ${t(`alarm.${am[1]}` as Key)}` : line);
     });
     const off2 = window.laser.onProgress((p) => setProgress(p));
     const off3 = window.laser.onClosed(() => {
       setConnected(false);
-      push('— Đã ngắt kết nối —');
+      push(t('log.disconnected'));
     });
     return () => {
       off1();
@@ -94,7 +91,7 @@ export function useGrbl() {
     async (path: string, baud: number) => {
       await window.laser.open(path, baud);
       setConnected(true);
-      push(`— Đã kết nối ${path} @ ${baud} —`);
+      push(t('log.connected', { port: path, baud }));
       // Bo GRBL thường tự reset khi mở cổng; gửi thêm $I để xác nhận phiên bản
       setTimeout(() => window.laser.send(['$I']), 1500);
     },

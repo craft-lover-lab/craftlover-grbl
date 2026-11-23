@@ -6,6 +6,9 @@ import { epsToPdf, listFonts, readFont, type FontEntry } from './system';
 
 let win: BrowserWindow | null = null;
 
+// LASER_PROFILE=<folder>: run with a separate settings profile (clean first-run state for tests/screenshots)
+if (process.env.LASER_PROFILE) app.setPath('userData', path.resolve(process.env.LASER_PROFILE));
+
 const grbl = new GrblConnection({
   onLine: (line) => win?.webContents.send('grbl:line', line),
   onProgress: (p) => win?.webContents.send('grbl:progress', p),
@@ -18,7 +21,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
-    title: 'Laser Tool',
+    title: 'CraftLover GRBL',
     backgroundColor: '#1b1d22',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -75,12 +78,23 @@ ipcMain.handle('grbl:pause', () => grbl.pause());
 ipcMain.handle('grbl:resume', () => grbl.resume());
 ipcMain.handle('grbl:abort', () => grbl.abort());
 
+// Native dialog labels follow the language chosen in the UI
+const DIALOG_TEXT = {
+  en: { graphics: 'Graphics & vectors', all: 'All files', project: 'CraftLover GRBL project' },
+  vi: { graphics: 'Hình & vector', all: 'Tất cả', project: 'Dự án CraftLover GRBL' },
+} as const;
+let uiLang: keyof typeof DIALOG_TEXT = 'en';
+const dt = () => DIALOG_TEXT[uiLang];
+ipcMain.handle('app:setLang', (_e, l: string) => {
+  if (l in DIALOG_TEXT) uiLang = l as keyof typeof DIALOG_TEXT;
+});
+
 ipcMain.handle('file:open', async () => {
   const r = await dialog.showOpenDialog(win!, {
     properties: ['openFile', 'multiSelections'],
     filters: [
-      { name: 'Hình & vector', extensions: ['svg', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp', 'pdf', 'eps', 'ai'] },
-      { name: 'Tất cả', extensions: ['*'] },
+      { name: dt().graphics, extensions: ['svg', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp', 'pdf', 'eps', 'ai'] },
+      { name: dt().all, extensions: ['*'] },
     ],
   });
   if (r.canceled) return [];
@@ -92,7 +106,7 @@ ipcMain.handle('file:open', async () => {
 ipcMain.handle('file:saveText', async (_e, defaultName: string, text: string, kind: 'gcode' | 'project' = 'gcode') => {
   const r = await dialog.showSaveDialog(win!, {
     defaultPath: defaultName,
-    filters: kind === 'project' ? [{ name: 'Dự án Laser Tool', extensions: ['lzr'] }] : [{ name: 'G-code', extensions: ['gcode', 'nc'] }],
+    filters: kind === 'project' ? [{ name: dt().project, extensions: ['lzr'] }] : [{ name: 'G-code', extensions: ['gcode', 'nc'] }],
   });
   if (r.canceled || !r.filePath) return false;
   await writeFile(r.filePath, text, 'utf8');
@@ -100,7 +114,7 @@ ipcMain.handle('file:saveText', async (_e, defaultName: string, text: string, ki
 });
 
 ipcMain.handle('file:openProject', async () => {
-  const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: 'Dự án Laser Tool', extensions: ['lzr'] }] });
+  const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: dt().project, extensions: ['lzr'] }] });
   if (r.canceled || !r.filePaths[0]) return null;
   return { name: path.basename(r.filePaths[0]), text: await readFile(r.filePaths[0], 'utf8') };
 });

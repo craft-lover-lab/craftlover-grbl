@@ -33,9 +33,8 @@ export function findGhostscript(): string | null {
 export async function epsToPdf(data: Uint8Array): Promise<Uint8Array> {
   const gs = findGhostscript();
   if (!gs)
-    throw new Error(
-      'Cần cài Ghostscript để mở file EPS.\nTải bản miễn phí tại https://ghostscript.com/releases/gsdnld.html (chọn bản 64-bit cho Windows), cài xong mở lại phần mềm.',
-    );
+    // The renderer turns this code into a translated message with the download link
+    throw new Error('GS_NOT_FOUND');
   const dir = await mkdtemp(path.join(os.tmpdir(), 'laser-eps-'));
   try {
     const src = path.join(dir, 'in.eps');
@@ -87,6 +86,6 @@ export async function listFonts(): Promise<FontEntry[]> {
 export async function readFont(file: string, allowed: FontEntry[]): Promise<Uint8Array> {
   // Chỉ cho đọc file nằm trong danh sách font đã liệt kê
   const norm = (f: string) => path.resolve(f).toLowerCase();
-  if (!allowed.some((f) => norm(f.file) === norm(file))) throw new Error('Font không hợp lệ');
+  if (!allowed.some((f) => norm(f.file) === norm(file))) throw new Error('FONT_INVALID');
   return new Uint8Array(await readFile(file));
 }
