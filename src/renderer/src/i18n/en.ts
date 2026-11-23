@@ -81,7 +81,7 @@ export const en = {
 
   // Job
   'job.empty': 'There are no objects yet',
-  'job.outOfBed': 'The toolpath ({x0}, {y0}) → ({x1}, {y1}) — including overscan and travel moves — goes outside the {w}×{h} mm bed. Continue anyway?',
+  'job.outOfBed': 'The toolpath ({x0}, {y0}) → ({x1}, {y1}) — including overscan and travel moves — goes outside the {w}×{h} mm bed.',
   'job.confirmStart': 'Start running {n} lines (about {time})?\nWear laser safety glasses and check the material.\nSTOP is a software stop — keep the machine\'s power switch / emergency stop within reach.',
   'frame.empty': 'There are no objects to frame',
 
@@ -249,6 +249,10 @@ export const en = {
   'check.notIdle': 'The machine is not idle (state: {state}) — wait until it stops',
   'check.laserMode': 'Laser mode is off ($32={value}). Send $32=1, otherwise the laser stays on during travel moves.',
   'check.sMax': 'S max does not match: GRBL $30={grbl}, app S max={app}. Make them equal in the Job panel or with $30=…',
+
+  'check.travel': 'Axis {axis} would move to {lo} … {hi} mm in machine coordinates, outside the machine travel {min} … {max} mm ($130/$131). Move the design or set the work origin again.',
+  'job.unverifiedTravel': 'Note: the machine has not been homed in this session, so its physical limits cannot be verified — only the bed area on screen was checked. Make sure the work origin is correct.',
+  'job.saveAnyway': 'Save the file anyway?',
 
   // Layers order, material library, test grid
   'tb.library': 'Materials',

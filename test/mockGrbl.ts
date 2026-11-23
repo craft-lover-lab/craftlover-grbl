@@ -20,6 +20,8 @@ export class MockGrbl {
   /** Motion queued in the planner (executed lines that "still move") */
   planner = 0;
   closed = false;
+  /** How many soft resets the controller performed */
+  resets = 0;
   private partial = '';
   private on!: { line: (l: string) => void; close: () => void; error: (m: string) => void };
 
@@ -118,6 +120,7 @@ export class MockGrbl {
 
   /** Spontaneous controller restart (power glitch, watchdog …). */
   softReset() {
+    this.resets++;
     this.rx = [];
     this.rxBytes = 0;
     this.planner = 0;

@@ -15,6 +15,7 @@ const grbl = new GrblConnection(
     onLine: (line) => win?.webContents.send('grbl:line', line),
     onProgress: (p) => win?.webContents.send('grbl:progress', p),
     onClose: () => win?.webContents.send('grbl:closed'),
+    onFire: (on, seconds) => win?.webContents.send('grbl:fire', { on, seconds }),
   },
   { open: openSerial },
 );
@@ -87,8 +88,10 @@ ipcMain.handle('grbl:check', async () => {
   grbl.realtime('?');
   const settings = await grbl.readSettings();
   await new Promise((r) => setTimeout(r, 300));
-  return { state: grbl.machineState, settings, jobActive: grbl.jobActive };
+  return { state: grbl.machineState, settings, jobActive: grbl.jobActive, homed: grbl.homed };
 });
+// Positioning beam: the main process owns the auto-off timer, so it works even if the UI hangs
+ipcMain.handle('grbl:fire', (_e, on: boolean, s: number, seconds: number) => (on ? grbl.fire(s, seconds) : grbl.fireOff()));
 
 // Native dialog labels follow the language chosen in the UI
 const DIALOG_TEXT = {

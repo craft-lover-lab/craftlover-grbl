@@ -82,33 +82,24 @@ export function ConnectionPanel({ g, machine, setMachine, locked }: { g: G; mach
 
 // ---------- Jogging, origin, homing ----------
 const FIRE_SECONDS = 10;
-export function JogPanel({ g, jog, disabled }: { g: G; jog: (dx: number, dy: number, step: number, feed: number) => void; disabled: boolean }) {
+export function JogPanel({ g, jog, disabled, sMax }: { g: G; jog: (dx: number, dy: number, step: number, feed: number) => void; disabled: boolean; sMax: number }) {
   const [step, setStep] = useState(10);
   const [feed, setFeed] = useState(3000);
-  // Fire 1%: a very weak beam to see the position. It switches itself off after
-  // FIRE_SECONDS so it can never be left burning in one spot.
+  // Fire 1%: a very weak beam to see the position. The main process switches it off after
+  // FIRE_SECONDS on its own (even if this window hangs); here we only show the countdown.
   const [fireLeft, setFireLeft] = useState(0);
   const firing = fireLeft > 0;
-  const stopFire = () => {
-    setFireLeft(0);
-    if (g.connected) g.send(['M5 S0']);
-  };
+  useEffect(() => window.laser.onFire(({ on, seconds }) => setFireLeft(on ? seconds : 0)), []);
   useEffect(() => {
     if (!firing) return;
-    if (disabled) {
-      // A job started or the connection dropped: the job itself starts with M5
-      setFireLeft(0);
-      return;
-    }
-    const id = setTimeout(() => (fireLeft <= 1 ? stopFire() : setFireLeft(fireLeft - 1)), 1000);
+    const id = setTimeout(() => setFireLeft((n) => Math.max(0, n - 1)), 1000);
     return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fireLeft, disabled]);
+  }, [fireLeft, firing]);
   const fire = async () => {
-    if (firing) return stopFire();
-    await g.send(['M3 S10', 'G1 F1000']);
-    setFireLeft(FIRE_SECONDS);
+    if (firing) return window.laser.fire(false);
+    await window.laser.fire(true, Math.round(sMax * 0.01), FIRE_SECONDS).catch((e: Error) => g.push(`⚠ ${e.message}`));
   };
+
   return (
     <section className="panel">
       <h3>{t('jog.title')}</h3>

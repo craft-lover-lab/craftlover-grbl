@@ -75,7 +75,7 @@ export const vi: Record<Key, string> = {
   'project.openFailed': 'Không mở được dự án: {msg}',
 
   'job.empty': 'Chưa có đối tượng nào',
-  'job.outOfBed': 'Đường chạy ({x0}, {y0}) → ({x1}, {y1}) — kể cả đi quá biên và di chuyển không cắt — vượt ra ngoài bàn máy {w}×{h} mm. Vẫn tiếp tục?',
+  'job.outOfBed': 'Đường chạy ({x0}, {y0}) → ({x1}, {y1}) — kể cả đi quá biên và di chuyển không cắt — vượt ra ngoài bàn máy {w}×{h} mm.',
   'job.confirmStart': 'Bắt đầu chạy {n} dòng lệnh (ước tính {time})?\nHãy đeo kính bảo hộ và kiểm tra phôi.\nNút DỪNG là dừng bằng phần mềm — hãy để công tắc nguồn / nút dừng khẩn cấp của máy trong tầm tay.',
   'frame.empty': 'Chưa có đối tượng nào để chạy khung',
 
@@ -234,6 +234,10 @@ export const vi: Record<Key, string> = {
   'check.notIdle': 'Máy chưa ở trạng thái rảnh (trạng thái: {state}) — hãy đợi máy dừng hẳn',
   'check.laserMode': 'Chế độ laser đang tắt ($32={value}). Gửi $32=1, nếu không laser sẽ vẫn sáng khi di chuyển không cắt.',
   'check.sMax': 'S max không khớp: GRBL $30={grbl}, phần mềm S max={app}. Hãy chỉnh cho bằng nhau trong bảng Công việc hoặc bằng lệnh $30=…',
+
+  'check.travel': 'Trục {axis} sẽ chạy tới {lo} … {hi} mm theo tọa độ máy, vượt hành trình của máy {min} … {max} mm ($130/$131). Hãy dời thiết kế hoặc đặt lại gốc làm việc.',
+  'job.unverifiedTravel': 'Lưu ý: máy chưa Homing trong phiên này nên không xác minh được giới hạn vật lý — phần mềm chỉ kiểm tra theo vùng bàn máy trên màn hình. Hãy chắc chắn gốc làm việc đã đặt đúng.',
+  'job.saveAnyway': 'Vẫn lưu file?',
 
   // Layers order, material library, test grid
   'tb.library': 'Vật liệu',

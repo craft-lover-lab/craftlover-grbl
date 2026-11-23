@@ -13,6 +13,10 @@
  * "completing": every job line was acknowledged, but the machine may still be moving.
  * A final `G4 P0` (sync) is only acknowledged once GRBL's planner is empty, and the job
  * is reported done only after that ack *and* a following "Idle" status report.
+ *
+ * Every timer belongs to a connection "epoch". Opening, closing or resetting the
+ * controller starts a new epoch, so a late timer from an old connection can never
+ * act on a new one.
  */
 
 /** GRBL 1.1 RX buffer size (the Sculpfun S30 board also uses 128 bytes; keep 1 byte spare). */
@@ -37,6 +41,8 @@ export interface GrblEvents {
   onLine: (line: string) => void;
   onProgress: (p: JobProgress) => void;
   onClose: () => void;
+  /** The positioning beam ("Fire") was switched on or off */
+  onFire?: (on: boolean, seconds: number) => void;
 }
 
 /** Byte stream to the controller (a serial port in the app, a mock in tests). */
@@ -56,6 +62,10 @@ export interface GrblOptions {
   stopOnError?: boolean;
   /** How long to wait for a feed hold to settle before the safety reset (ms) */
   holdTimeoutMs?: number;
+  /** How long runJob() waits for earlier manual commands to finish (ms) */
+  manualDrainTimeoutMs?: number;
+  /** How long to wait for a fresh status report (ms) */
+  statusTimeoutMs?: number;
 }
 
 type Source = 'job' | 'manual' | 'sync';
@@ -65,6 +75,12 @@ interface InFlight {
   line: string;
   /** 1-based job line number (job lines only) */
   n?: number;
+}
+
+interface Waiter<T> {
+  resolve: (v: T) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 const ACTIVE: JobState[] = ['running', 'paused', 'completing'];
@@ -77,14 +93,25 @@ export class GrblConnection {
   private job: JobProgress = { state: 'idle', total: 0, sent: 0, acked: 0, errors: 0 };
   private syncAcked = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private holdTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped on open / close — transport callbacks from an older port are ignored */
+  private connId = 0;
+  /** Bumped on open / close / controller reset — timers from older epochs do nothing */
+  private epoch = 0;
+  /** Pending "reset once the hold has settled" after a G-code error */
+  private safety: { epoch: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** Auto-off timer for the positioning beam */
+  private fireTimer: ReturnType<typeof setTimeout> | null = null;
   /** True while we are resetting the controller ourselves (STOP / safety stop) */
   private resetting = false;
   /** Last machine state from a status report, e.g. "Idle", "Run", "Hold:0", "Alarm" */
   machineState = '';
+  /** True after a successful $H in this connection; cleared by alarm, reset or disconnect */
+  homed = false;
   /** Latest $-settings seen in replies to "$$" */
   settings: Record<string, string> = {};
-  private settingsWaiters: { resolve: (s: Record<string, string>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }[] = [];
+  private settingsWaiters: Waiter<Record<string, string>>[] = [];
+  private statusWaiters: Waiter<string>[] = [];
+  private drainWaiters: Waiter<void>[] = [];
 
   constructor(
     private ev: GrblEvents,
@@ -103,25 +130,41 @@ export class GrblConnection {
     return { ...this.job };
   }
 
+  get firing() {
+    return !!this.fireTimer;
+  }
+
   async open(path: string, baud: number) {
     this.close();
-    this.t = await this.opt.open(path, baud, {
-      line: (l) => this.handleLine(l.trim()),
-      close: () => this.onTransportClosed(),
+    const id = ++this.connId;
+    this.epoch++;
+    const t = await this.opt.open(path, baud, {
+      line: (l) => id === this.connId && this.handleLine(l.trim()),
+      close: () => id === this.connId && this.onTransportClosed(),
       error: (msg) => this.ev.onLine(`[PORT ERROR] ${msg}`),
     });
+    if (id !== this.connId) {
+      // close() was called while the port was opening
+      t.close();
+      throw new Error('ABORTED');
+    }
+    this.t = t;
     this.machineState = '';
     this.settings = {};
+    this.homed = false;
     this.startPolling();
   }
 
   close() {
     const t = this.t;
+    if (t) this.fireOff(); // best effort: switch the positioning beam off before letting go
     this.t = null;
+    this.connId++;
+    this.epoch++;
     this.stopPolling();
     t?.close();
     this.endJob('aborted', 'disconnected');
-    this.clearQueues();
+    this.teardown();
   }
 
   /** Real-time commands (bypass the queue): '?', '!', '~', 0x18, 0x85 ... */
@@ -144,12 +187,19 @@ export class GrblConnection {
     this.pump();
   }
 
-  /** Start a job. The caller is expected to have checked the machine state first. */
-  runJob(lines: string[]) {
+  /**
+   * Start a job. Waits until earlier manual commands are finished, then asks for a
+   * fresh status report and only starts when the machine is really Idle.
+   */
+  async runJob(lines: string[]) {
     if (!this.t) throw new Error('NOT_CONNECTED');
     if (this.jobActive) throw new Error('JOB_RUNNING');
-    const state = this.machineState.split(':')[0];
-    if (state && state !== 'Idle') throw new Error(`NOT_IDLE:${this.machineState}`);
+    this.fireOff();
+    await this.waitManualDrained();
+    const state = await this.freshStatus();
+    if (state.split(':')[0] !== 'Idle') throw new Error(`NOT_IDLE:${state}`);
+    if (this.jobActive) throw new Error('JOB_RUNNING');
+    if (!this.t) throw new Error('NOT_CONNECTED');
     const clean = lines.map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
     this.job = { state: 'running', total: clean.length, sent: 0, acked: 0, errors: 0 };
     this.syncAcked = false;
@@ -177,10 +227,41 @@ export class GrblConnection {
    * This is a software stop — it does not replace a physical emergency switch.
    */
   abort() {
-    this.clearQueues();
+    this.teardown();
     this.resetting = true;
     this.realtime(0x18);
     this.endJob('aborted', 'stopped');
+  }
+
+  /**
+   * Positioning beam: constant low power (M3) that the main process switches off
+   * after `seconds`, even if the UI hangs. Refused while a job is active.
+   */
+  fire(sValue: number, seconds: number) {
+    this.send([`M3 S${Math.max(0, Math.round(sValue))}`, 'G1 F1000']);
+    if (this.fireTimer) clearTimeout(this.fireTimer);
+    const epoch = this.epoch;
+    this.fireTimer = setTimeout(() => {
+      this.fireTimer = null;
+      if (epoch === this.epoch) this.fireOff(true);
+    }, seconds * 1000);
+    this.ev.onFire?.(true, seconds);
+  }
+
+  /** Switch the positioning beam off (no-op when it is not on). */
+  fireOff(auto = false) {
+    if (this.fireTimer) clearTimeout(this.fireTimer);
+    const wasOn = !!this.fireTimer || auto;
+    this.fireTimer = null;
+    if (!wasOn) return;
+    if (this.t && !this.jobActive) {
+      try {
+        this.send(['M5 S0']);
+      } catch {
+        /* not connected */
+      }
+    }
+    this.ev.onFire?.(false, 0);
   }
 
   /**
@@ -194,25 +275,73 @@ export class GrblConnection {
       } catch (e) {
         return reject(e);
       }
-      const timer = setTimeout(() => {
-        this.settingsWaiters = this.settingsWaiters.filter((w) => w.timer !== timer);
-        reject(new Error('SETTINGS_TIMEOUT'));
-      }, timeoutMs);
-      this.settingsWaiters.push({ resolve, reject, timer });
+      this.settingsWaiters.push(this.waiter(this.settingsWaiters, resolve, reject, timeoutMs, 'SETTINGS_TIMEOUT'));
+    });
+  }
+
+  /** Ask for a status report and resolve with the state it contains. */
+  freshStatus(timeoutMs = this.opt.statusTimeoutMs ?? 1000): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (!this.t) return reject(new Error('NOT_CONNECTED'));
+      this.statusWaiters.push(this.waiter(this.statusWaiters, resolve, reject, timeoutMs, 'STATUS_TIMEOUT'));
+      this.realtime('?');
     });
   }
 
   // ---------------------------------------------------------------------------
 
-  private clearQueues() {
+  private waiter<T>(list: Waiter<T>[], resolve: (v: T) => void, reject: (e: Error) => void, ms: number, code: string): Waiter<T> {
+    const w: Waiter<T> = {
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        const i = list.indexOf(w);
+        if (i >= 0) list.splice(i, 1);
+        reject(new Error(code));
+      }, ms),
+    };
+    return w;
+  }
+
+  private settle<T>(list: Waiter<T>[], v: T) {
+    for (const w of list.splice(0)) {
+      clearTimeout(w.timer);
+      w.resolve(v);
+    }
+  }
+
+  private failAll(list: Waiter<unknown>[], code: string) {
+    for (const w of list.splice(0)) {
+      clearTimeout(w.timer);
+      w.reject(new Error(code));
+    }
+  }
+
+  private get manualPending() {
+    return this.manualQueue.length > 0 || this.inFlight.some((f) => f.src === 'manual');
+  }
+
+  private waitManualDrained(): Promise<void> {
+    if (!this.manualPending) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      this.drainWaiters.push(this.waiter(this.drainWaiters, resolve, reject, this.opt.manualDrainTimeoutMs ?? 5000, 'MANUAL_PENDING'));
+    });
+  }
+
+  /** Drop queues, timers and waiters (STOP, reset, alarm, disconnect). */
+  private teardown() {
     this.jobQueue = [];
     this.manualQueue = [];
     this.inFlight = [];
-    for (const w of this.settingsWaiters) {
-      clearTimeout(w.timer);
-      w.reject(new Error('ABORTED'));
+    this.cancelSafetyStop();
+    if (this.fireTimer) {
+      clearTimeout(this.fireTimer);
+      this.fireTimer = null;
+      this.ev.onFire?.(false, 0);
     }
-    this.settingsWaiters = [];
+    this.failAll(this.settingsWaiters as Waiter<unknown>[], 'ABORTED');
+    this.failAll(this.statusWaiters as Waiter<unknown>[], 'ABORTED');
+    this.failAll(this.drainWaiters as Waiter<unknown>[], 'ABORTED');
   }
 
   private endJob(state: 'done' | 'aborted' | 'failed', reason?: StopReason, detail?: string) {
@@ -227,30 +356,41 @@ export class GrblConnection {
   /**
    * Safety stop after a G-code error: stop feeding lines, feed-hold so the head
    * decelerates without losing position (GRBL turns the laser off in hold), then
-   * soft-reset to flush whatever is still buffered.
+   * soft-reset to flush whatever is still buffered — when Hold:0 is reported, or
+   * after holdTimeoutMs at the latest. Exactly one reset is sent.
    */
   private safetyStop(detail: string) {
     this.jobQueue = [];
     this.manualQueue = [];
     this.endJob('failed', 'error', detail);
     this.realtime('!');
-    const reset = () => {
-      if (this.holdTimer) clearTimeout(this.holdTimer);
-      this.holdTimer = null;
-      this.clearQueues();
-      this.resetting = true;
-      this.realtime(0x18);
-    };
-    this.pendingHoldReset = reset;
-    this.holdTimer = setTimeout(reset, this.opt.holdTimeoutMs ?? 3000);
+    this.cancelSafetyStop();
+    const epoch = this.epoch;
+    this.safety = { epoch, timer: setTimeout(() => this.safetyReset(epoch), this.opt.holdTimeoutMs ?? 3000) };
   }
-  private pendingHoldReset: (() => void) | null = null;
+
+  private safetyReset(epoch: number) {
+    // Only the pending safety stop of this very connection may reset — and only once
+    if (!this.safety || this.safety.epoch !== epoch || epoch !== this.epoch) return;
+    this.cancelSafetyStop();
+    this.teardown();
+    this.resetting = true;
+    this.realtime(0x18);
+  }
+
+  private cancelSafetyStop() {
+    if (this.safety) clearTimeout(this.safety.timer);
+    this.safety = null;
+  }
 
   private onTransportClosed() {
     this.t = null;
+    this.connId++;
+    this.epoch++;
     this.stopPolling();
+    this.homed = false;
     this.endJob('aborted', 'disconnected');
-    this.clearQueues();
+    this.teardown();
     this.ev.onClose();
   }
 
@@ -300,15 +440,16 @@ export class GrblConnection {
       } else if (f?.src === 'sync') {
         this.syncAcked = true;
         if (this.job.state === 'running') this.job.state = 'completing';
-      } else if (f?.src === 'manual' && f.line === '$$') {
-        for (const w of this.settingsWaiters.splice(0)) {
-          clearTimeout(w.timer);
-          if (isError) w.reject(new Error(line));
-          else w.resolve({ ...this.settings });
+      } else if (f?.src === 'manual') {
+        if (f.line === '$$') {
+          if (isError) this.failAll(this.settingsWaiters as Waiter<unknown>[], line);
+          else this.settle(this.settingsWaiters, { ...this.settings });
         }
+        if (/^\$H$/i.test(f.line)) this.homed = !isError;
       }
       if (isError) this.ev.onLine(f ? `${line}  ← ${f.line}` : line);
       this.pump();
+      if (!this.manualPending) this.settle(this.drainWaiters, undefined);
       this.emitProgress(true);
       return;
     }
@@ -317,14 +458,17 @@ export class GrblConnection {
     if (setting) this.settings[`$${setting[1]}`] = setting[2];
 
     if (line.startsWith('ALARM:')) {
-      this.clearQueues();
+      this.homed = false;
+      this.teardown();
       this.endJob('aborted', 'alarm', line);
     }
 
     if (/^Grbl\b|^GrblHAL\b/i.test(line)) {
       // The controller restarted: its buffers are empty and anything still queued
-      // must never be sent on its own — the job cannot continue.
-      this.clearQueues();
+      // must never be sent on its own — the job cannot continue. Old timers die with the epoch.
+      this.epoch++;
+      this.homed = false;
+      this.teardown();
       this.endJob('aborted', this.resetting ? 'stopped' : 'reset');
       this.resetting = false;
       this.machineState = '';
@@ -335,18 +479,18 @@ export class GrblConnection {
   private onStatus(line: string) {
     this.machineState = line.replace(/^<|>$/g, '').split('|')[0];
     const state = this.machineState.split(':')[0];
-    if (state === 'Alarm' && this.jobActive) {
-      this.clearQueues();
-      this.endJob('aborted', 'alarm', this.machineState);
+    if (state === 'Alarm') {
+      this.homed = false;
+      if (this.jobActive) {
+        this.teardown();
+        this.endJob('aborted', 'alarm', this.machineState);
+      }
     }
     // Hold:0 = hold complete (the head has stopped) → safe to reset after a G-code error
-    if (this.machineState === 'Hold:0' && this.pendingHoldReset) {
-      const r = this.pendingHoldReset;
-      this.pendingHoldReset = null;
-      r();
-    }
+    if (this.machineState === 'Hold:0' && this.safety) this.safetyReset(this.safety.epoch);
     // Done only when the sync dwell was acknowledged and the machine reports Idle afterwards
     if (this.job.state === 'completing' && this.syncAcked && state === 'Idle') this.endJob('done');
+    this.settle(this.statusWaiters, this.machineState);
   }
 
   private startPolling() {

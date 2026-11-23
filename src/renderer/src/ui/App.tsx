@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Anchor, Bounds, Item, JobOptions, Layer, MachineProfile, MaterialPreset, OriginMode, Pt } from '../core/types';
 import { itemBounds, uid } from '../core/geometry';
-import { frameGcode, gcodeBounds, generateJob, insideBed, jobBounds } from '../core/gcode';
+import { activeItems, frameGcode, gcodeBounds, generateJob, insideBed, jobBounds } from '../core/gcode';
+import { checkMachineTravel } from '../core/limits';
 import { importSvg } from '../io/svg';
 import { importPdf, importRaster } from '../io/image';
 import { textToPaths, type TextAlign } from '../io/text';
@@ -29,7 +30,8 @@ const DEFAULT_MACHINE: MachineProfile = {
   sMax: 1000,
   baud: 115200,
   frameSpeed: 3000,
-  framePower: 1,
+  // Frame with the laser off by default; users can raise it for a visible dot
+  framePower: 0,
   travelSpeed: 6000,
 };
 
@@ -496,30 +498,30 @@ export function App() {
   (window as any).__laserSetCopies = (cols: number, rows: number) => setItems((a) => a.map((i, k) => (k === 0 ? { ...i, copies: { ...i.copies, cols, rows } } : i)));
 
   // ---------- Running jobs ----------
-  /** Confirm when the real toolpath (overscan and travel included) leaves the bed. */
-  function confirmInsideBed(b: Bounds) {
-    if (insideBed(b, machine)) return true;
-    const msg = t('job.outOfBed', { x0: b.minX.toFixed(1), y0: b.minY.toFixed(1), x1: b.maxX.toFixed(1), y1: b.maxY.toFixed(1), w: machine.bedW, h: machine.bedH });
-    return confirm(msg);
-  }
+  const outOfBedText = (b: Bounds) =>
+    t('job.outOfBed', { x0: b.minX.toFixed(1), y0: b.minY.toFixed(1), x1: b.maxX.toFixed(1), y1: b.maxY.toFixed(1), w: machine.bedW, h: machine.bedH });
 
   function buildJob() {
-    if (items.length === 0) throw new Error(t('job.empty'));
-    const j = generateJob(items, layers, machine, jobOpt);
-    return confirmInsideBed(j.motion) ? j : null;
+    if (activeItems(items, layers).length === 0) throw new Error(t('job.empty'));
+    return generateJob(items, layers, machine, jobOpt);
   }
 
   /**
-   * Make sure the controller is really ready before anything moves:
-   * Idle state, and for jobs also laser mode ($32=1) and a matching S max ($30).
+   * Make sure the controller is really ready before anything moves, and that the real
+   * toolpath (overscan and travel included) stays within reach. Problems block the run —
+   * there is no "continue anyway".
+   *
+   * - Homed in this session (and homing enabled): check MACHINE coordinates against $130/$131.
+   * - Not homed: machine zero is arbitrary, so only the work-coordinate bed check is possible;
+   *   it is enforced, but the user is told that physical limits are not verified.
    */
-  async function machineReady(kind: 'job' | 'frame'): Promise<boolean> {
+  async function machineReady(kind: 'job' | 'frame', motion: Bounds): Promise<{ ok: boolean; unverified: boolean }> {
     let r: Awaited<ReturnType<typeof window.laser.checkMachine>>;
     try {
       r = await window.laser.checkMachine();
     } catch (e) {
       alert(t('check.failed', { msg: errorText(e) }));
-      return false;
+      return { ok: false, unverified: true };
     }
     const problems: string[] = [];
     const state = r.state.split(':')[0];
@@ -530,17 +532,26 @@ export function App() {
       const smax = Number(r.settings['$30']);
       if (!Number.isFinite(smax) || smax !== machine.sMax) problems.push(t('check.sMax', { grbl: r.settings['$30'] ?? '?', app: machine.sMax }));
     }
+    const tx = Number(r.settings['$130']);
+    const ty = Number(r.settings['$131']);
+    const verified = r.homed && r.settings['$22'] === '1' && tx > 0 && ty > 0;
+    if (verified) {
+      const p = checkMachineTravel(motion, g.wco.current, g.status.mpos, { x: tx, y: ty });
+      if (p) problems.push(t('check.travel', { axis: p.axis, lo: p.lo.toFixed(1), hi: p.hi.toFixed(1), min: p.min.toFixed(1), max: p.max.toFixed(1) }));
+    } else if (!insideBed(motion, machine)) problems.push(outOfBedText(motion));
     if (problems.length) {
       alert(`${t('check.title')}\n\n• ${problems.join('\n• ')}`);
-      return false;
+      return { ok: false, unverified: !verified };
     }
-    return true;
+    return { ok: true, unverified: !verified };
   }
 
   async function exportGcode() {
     try {
       const j = buildJob();
-      if (j) await window.laser.saveText('job.gcode', j.lines.join('\n') + '\n');
+      // A file can be run elsewhere, so this stays a warning rather than a block
+      if (!insideBed(j.motion, machine) && !confirm(`${outOfBedText(j.motion)} ${t('job.saveAnyway')}`)) return;
+      await window.laser.saveText('job.gcode', j.lines.join('\n') + '\n');
     } catch (e) {
       alert(errorText(e));
     }
@@ -549,9 +560,10 @@ export function App() {
   async function startJob() {
     try {
       const j = buildJob();
-      if (!j) return;
-      if (!(await machineReady('job'))) return;
-      if (!confirm(t('job.confirmStart', { n: j.lines.length, time: fmtTime(j.seconds) }))) return;
+      const ready = await machineReady('job', j.motion);
+      if (!ready.ok) return;
+      const note = ready.unverified ? `\n\n${t('job.unverifiedTravel')}` : '';
+      if (!confirm(t('job.confirmStart', { n: j.lines.length, time: fmtTime(j.seconds) }) + note)) return;
       await window.laser.run(j.lines);
     } catch (e) {
       alert(errorText(e));
@@ -559,10 +571,9 @@ export function App() {
   }
 
   async function runFrame() {
-    const lines = frameGcode(items, machine, jobOpt);
+    const lines = frameGcode(activeItems(items, layers), machine, jobOpt);
     if (!lines.length) return alert(t('frame.empty'));
-    if (!confirmInsideBed(gcodeBounds(lines))) return;
-    if (!(await machineReady('frame'))) return;
+    if (!(await machineReady('frame', gcodeBounds(lines))).ok) return;
     await g.send(lines);
   }
 
@@ -642,14 +653,14 @@ export function App() {
             onTextAt={(pt) => setTextAt(pt)}
             onToolDone={() => setTool('select')}
             laserPos={g.connected ? g.status.wpos : null}
-            jobFrame={originMode === 'current' && items.length ? jobBounds(items, jobOpt) : null}
+            jobFrame={originMode === 'current' && activeItems(items, layers).length ? jobBounds(activeItems(items, layers), jobOpt) : null}
             preview={job?.preview ?? null}
           />
           <Palette layers={layers} activeId={activeLayerId} onPick={pickColor} />
         </div>
         <aside className="side">
           <ConnectionPanel g={g} machine={machine} setMachine={setMachine} locked={running} />
-          <JogPanel g={g} jog={jog} disabled={!g.connected || running} />
+          <JogPanel g={g} jog={jog} disabled={!g.connected || running} sMax={machine.sMax} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
           {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} />}
           <LayersPanel

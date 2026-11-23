@@ -10,17 +10,37 @@ export interface Raster {
   py: number;
 }
 
-const cache = new Map<string, Raster>();
-
-function key(item: Item, layer: Layer) {
-  return [item.id, item.w, item.h, item.srcW, item.srcH, layer.lineInterval, layer.dither, layer.threshold, layer.minPower, layer.power, layer.mode, item.bitmap?.url.length, item.paths?.length].join('|');
+/** Layer/size parameters that change the sampled result (geometry is handled by identity). */
+function paramKey(item: Item, layer: Layer) {
+  return [item.w, item.h, item.srcW, item.srcH, layer.lineInterval, layer.dither, layer.threshold, layer.minPower, layer.power, layer.mode].join('|');
 }
 
-/** Sample an object into a dot grid at the layer's line interval. */
-export function rasterize(item: Item, layer: Layer): Raster {
-  const k = key(item, layer);
-  const hit = cache.get(k);
-  if (hit) return hit;
+/**
+ * Cache sampled rasters per geometry object. Items are immutable: any edit to the shape
+ * (rotate, flip, reshape, trace, project load …) produces a new `paths` array or `bitmap`
+ * object, so a WeakMap keyed by that object can never return a stale raster — even when
+ * the size and path count stay the same (e.g. a 180° rotation).
+ */
+export function createRasterCache(sample: (item: Item, layer: Layer) => Raster) {
+  const cache = new WeakMap<object, Map<string, Raster>>();
+  return (item: Item, layer: Layer): Raster => {
+    const geom: object | undefined = item.kind === 'bitmap' ? item.bitmap : item.paths;
+    if (!geom) return sample(item, layer);
+    let byParams = cache.get(geom);
+    if (!byParams) cache.set(geom, (byParams = new Map()));
+    const k = paramKey(item, layer);
+    let r = byParams.get(k);
+    if (!r) {
+      r = sample(item, layer);
+      if (byParams.size > 8) byParams.clear();
+      byParams.set(k, r);
+    }
+    return r;
+  };
+}
+
+/** Sample an object into a dot grid at the layer's line interval (needs a browser canvas). */
+function sampleRaster(item: Item, layer: Layer): Raster {
   const iv = Math.max(0.02, layer.lineInterval);
   const cols = Math.max(1, Math.round(item.w / iv));
   const rows = Math.max(1, Math.round(item.h / iv));
@@ -102,8 +122,7 @@ export function rasterize(item: Item, layer: Layer): Raster {
       data[j] = dark < 0.02 ? 0 : minF + (1 - minF) * dark;
     }
   }
-  const r: Raster = { cols, rows, data, px: item.w / cols, py: item.h / rows };
-  if (cache.size > 30) cache.clear();
-  cache.set(k, r);
-  return r;
+  return { cols, rows, data, px: item.w / cols, py: item.h / rows };
 }
+
+export const rasterize = createRasterCache(sampleRaster);

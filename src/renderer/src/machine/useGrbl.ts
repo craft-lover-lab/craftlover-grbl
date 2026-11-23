@@ -44,7 +44,9 @@ declare global {
       pause(): Promise<void>;
       resume(): Promise<void>;
       abort(): Promise<void>;
-      checkMachine(): Promise<{ state: string; settings: Record<string, string>; jobActive: boolean }>;
+      checkMachine(): Promise<{ state: string; settings: Record<string, string>; jobActive: boolean; homed: boolean }>;
+      fire(on: boolean, s?: number, seconds?: number): Promise<void>;
+      onFire(cb: (v: { on: boolean; seconds: number }) => void): () => void;
       openFiles(): Promise<{ name: string; data: Uint8Array }[]>;
       saveText(name: string, text: string, kind?: 'gcode' | 'project'): Promise<boolean>;
       openProject(): Promise<{ name: string; text: string } | null>;

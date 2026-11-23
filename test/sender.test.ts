@@ -25,8 +25,8 @@ beforeEach(async () => {
 });
 
 describe('streaming', () => {
-  it('streams a long job without ever overflowing the 128-byte RX buffer', () => {
-    conn.runJob(job(800));
+  it('streams a long job without ever overflowing the 128-byte RX buffer', async () => {
+    await conn.runJob(job(800));
     // MockGrbl throws on overflow; draining executes everything
     mock.drain();
     const sent = mock.received.filter((l) => l.startsWith('G1'));
@@ -34,8 +34,8 @@ describe('streaming', () => {
     expect(mock.received[mock.received.length - 1]).toBe('G4 P0');
   });
 
-  it('strips comments and blank lines from job G-code', () => {
-    conn.runJob(['; header', '', 'G0 X1 ; move', 'M5']);
+  it('strips comments and blank lines from job G-code', async () => {
+    await conn.runJob(['; header', '', 'G0 X1 ; move', 'M5']);
     mock.drain();
     expect(mock.received.slice(0, 2)).toEqual(['G0 X1', 'M5']);
     expect(last().total).toBe(2);
@@ -43,8 +43,8 @@ describe('streaming', () => {
 });
 
 describe('completion', () => {
-  it('is not done when every line is acknowledged but the machine still moves', () => {
-    conn.runJob(job(20));
+  it('is not done when every line is acknowledged but the machine still moves', async () => {
+    await conn.runJob(job(20));
     mock.step(); // execute all 20 lines → all acked, planner still busy
     expect(last().acked).toBe(20);
     expect(last().state).toBe('completing');
@@ -52,8 +52,8 @@ describe('completion', () => {
     expect(last().state).toBe('completing');
   });
 
-  it('is done only after the sync dwell is acknowledged and the machine reports Idle', () => {
-    conn.runJob(job(20));
+  it('is done only after the sync dwell is acknowledged and the machine reports Idle', async () => {
+    await conn.runJob(job(20));
     mock.step();
     mock.finishMotion();
     mock.step(); // G4 P0 can now be acknowledged
@@ -63,9 +63,9 @@ describe('completion', () => {
     expect(conn.jobActive).toBe(false);
   });
 
-  it('runs consecutive jobs with independent progress', () => {
+  it('runs consecutive jobs with independent progress', async () => {
     for (let k = 0; k < 3; k++) {
-      conn.runJob(job(50 + k));
+      await conn.runJob(job(50 + k));
       mock.drain();
       mock.reportStatus();
       expect(last()).toMatchObject({ state: 'done', total: 50 + k, acked: 50 + k, errors: 0 });
@@ -74,8 +74,8 @@ describe('completion', () => {
 });
 
 describe('manual commands', () => {
-  it('are refused while a job is active (running, paused or completing)', () => {
-    conn.runJob(job(10));
+  it('are refused while a job is active (running, paused or completing)', async () => {
+    await conn.runJob(job(10));
     expect(() => conn.send(['G0 X0'])).toThrow('BUSY');
     conn.pause();
     expect(() => conn.send(['$X'])).toThrow('BUSY');
@@ -89,19 +89,20 @@ describe('manual commands', () => {
     expect(() => conn.send(['G0 X0'])).not.toThrow();
   });
 
-  it('acknowledgements of manual commands are not counted as job progress', () => {
+  it('acknowledgements of manual commands are not counted as job progress', async () => {
     conn.send(['G0 X5', 'G0 Y5']); // in flight, not executed yet
-    conn.runJob(job(3));
+    const started = conn.runJob(job(3));
     mock.step(2); // executes the two manual lines
+    mock.finishMotion();
+    await started;
     expect(last().acked).toBe(0);
     mock.step();
     expect(last().acked).toBe(3);
   });
 
-  it('refuses to start a job when the machine is not idle', () => {
+  it('refuses to start a job when the machine is not idle', async () => {
     mock.alarm(1);
-    mock.reportStatus();
-    expect(() => conn.runJob(job(5))).toThrow(/NOT_IDLE/);
+    await expect(conn.runJob(job(5))).rejects.toThrow(/NOT_IDLE/);
   });
 
   it('reads $$ settings', async () => {
@@ -112,10 +113,10 @@ describe('manual commands', () => {
 });
 
 describe('errors and interruptions', () => {
-  it('stops on a G-code error: feed hold first, then reset after the hold settles', () => {
+  it('stops on a G-code error: feed hold first, then reset after the hold settles', async () => {
     const lines = job(40);
     lines[5] = 'G1 BAD';
-    conn.runJob(lines);
+    await conn.runJob(lines);
     mock.step();
     expect(last()).toMatchObject({ state: 'failed', reason: 'error' });
     expect(last().detail).toContain('BAD');
@@ -133,7 +134,7 @@ describe('errors and interruptions', () => {
     try {
       const lines = job(10);
       lines[0] = 'BAD';
-      conn.runJob(lines);
+      await conn.runJob(lines);
       mock.step();
       expect(last().state).toBe('failed');
       vi.advanceTimersByTime(60);
@@ -143,8 +144,8 @@ describe('errors and interruptions', () => {
     }
   });
 
-  it('aborts and never resumes streaming after an unexpected controller reset', () => {
-    conn.runJob(job(300));
+  it('aborts and never resumes streaming after an unexpected controller reset', async () => {
+    await conn.runJob(job(300));
     mock.step(10);
     mock.softReset(); // spontaneous restart mid-job
     expect(last()).toMatchObject({ state: 'aborted', reason: 'reset' });
@@ -154,15 +155,15 @@ describe('errors and interruptions', () => {
     expect(mock.received.length).toBe(count);
   });
 
-  it('aborts on an alarm', () => {
-    conn.runJob(job(100));
+  it('aborts on an alarm', async () => {
+    await conn.runJob(job(100));
     mock.step(5);
     mock.alarm(2);
     expect(last()).toMatchObject({ state: 'aborted', reason: 'alarm' });
   });
 
-  it('aborts when the connection is lost', () => {
-    conn.runJob(job(100));
+  it('aborts when the connection is lost', async () => {
+    await conn.runJob(job(100));
     mock.step(5);
     mock.disconnect();
     expect(last()).toMatchObject({ state: 'aborted', reason: 'disconnected' });
@@ -170,8 +171,8 @@ describe('errors and interruptions', () => {
     expect(() => conn.send(['G0 X0'])).toThrow('NOT_CONNECTED');
   });
 
-  it('STOP soft-resets immediately and reports a user stop (not a crash)', () => {
-    conn.runJob(job(100));
+  it('STOP soft-resets immediately and reports a user stop (not a crash)', async () => {
+    await conn.runJob(job(100));
     mock.step(5);
     conn.abort();
     expect(last()).toMatchObject({ state: 'aborted', reason: 'stopped' });
@@ -179,8 +180,8 @@ describe('errors and interruptions', () => {
     expect(mock.rx).toHaveLength(0);
   });
 
-  it('pause sends a feed hold and resume continues to completion', () => {
-    conn.runJob(job(30));
+  it('pause sends a feed hold and resume continues to completion', async () => {
+    await conn.runJob(job(30));
     mock.step(5);
     conn.pause();
     expect(mock.state).toBe('Hold:1');
@@ -193,5 +194,122 @@ describe('errors and interruptions', () => {
     mock.reportStatus();
     expect(acked).toBeLessThan(30);
     expect(last().state).toBe('done');
+  });
+});
+
+describe('review round 2', () => {
+  it('waits for earlier manual commands, then requires a fresh Idle status', async () => {
+    conn.send(['G0 X10']);
+    const p = conn.runJob(job(3));
+    await Promise.resolve();
+    expect(mock.received.filter((l) => l.startsWith('G1'))).toHaveLength(0); // job not started yet
+    mock.step(); // G0 acknowledged, but the machine is still moving (Run)
+    await expect(p).rejects.toThrow(/NOT_IDLE:Run/);
+    mock.finishMotion();
+    await conn.runJob(job(3));
+    mock.step();
+    expect(last().acked).toBe(3);
+  });
+
+  it('gives up when manual commands never finish', async () => {
+    vi.useFakeTimers();
+    try {
+      conn.send(['G0 X10']);
+      const p = conn.runJob(job(3));
+      const check = expect(p).rejects.toThrow('MANUAL_PENDING');
+      await vi.advanceTimersByTimeAsync(6000);
+      await check;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resets exactly once when the hold timeout fires before Hold:0 arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const lines = job(10);
+      lines[0] = 'BAD';
+      await conn.runJob(lines);
+      mock.step();
+      vi.advanceTimersByTime(60); // fallback reset
+      expect(mock.resets).toBe(1);
+      mock.state = 'Hold:0';
+      mock.reportStatus(); // a late Hold:0 must not trigger a second reset
+      expect(mock.resets).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a safety timer from an old connection never touches a new one', async () => {
+    vi.useFakeTimers();
+    try {
+      let current = mock;
+      const c2 = new GrblConnection(
+        { onLine: () => {}, onProgress: (p) => events.push(p), onClose: () => {} },
+        { open: (...a) => current.factory(...a), pollMs: 0, holdTimeoutMs: 50 },
+      );
+      await c2.open('MOCK', 115200);
+      mock.reportStatus();
+      const lines = job(10);
+      lines[0] = 'BAD';
+      await c2.runJob(lines);
+      mock.step(); // error → safety stop pending
+      c2.close(); // user disconnects before the hold settles
+      current = new MockGrbl();
+      await c2.open('MOCK', 115200); // reconnect quickly
+      vi.advanceTimersByTime(5000);
+      expect(current.resets).toBe(0);
+      current.state = 'Hold:0';
+      current.reportStatus();
+      expect(current.resets).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('switches the positioning beam off by itself (main-process watchdog)', async () => {
+    vi.useFakeTimers();
+    try {
+      conn.fire(10, 10);
+      mock.step();
+      expect(mock.received).toContain('M3 S10');
+      expect(conn.firing).toBe(true);
+      vi.advanceTimersByTime(9000);
+      expect(mock.received).not.toContain('M5 S0');
+      vi.advanceTimersByTime(1100);
+      expect(mock.received).toContain('M5 S0');
+      expect(conn.firing).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('turns the beam off before a job and on disconnect', async () => {
+    conn.fire(10, 10);
+    mock.step();
+    mock.finishMotion();
+    const p = conn.runJob(job(2));
+    mock.step(); // M5 from fireOff
+    mock.finishMotion();
+    await p;
+    expect(mock.received.indexOf('M5 S0')).toBeLessThan(mock.received.findIndex((l) => l.startsWith('G1 X')));
+    expect(conn.firing).toBe(false);
+    expect(() => conn.fire(10, 10)).toThrow('BUSY'); // never during a job
+    mock.drain();
+    mock.reportStatus(); // job done
+
+    conn.fire(10, 10);
+    const before = mock.received.length;
+    conn.close();
+    expect(mock.received.slice(before)).toContain('M5 S0');
+  });
+
+  it('forgets homing on alarm and reset', async () => {
+    conn.send(['$H']);
+    mock.step();
+    expect(conn.homed).toBe(true);
+    mock.softReset();
+    expect(conn.homed).toBe(false);
   });
 });

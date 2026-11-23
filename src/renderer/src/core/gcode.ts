@@ -7,6 +7,12 @@ const f = (n: number) => {
   return s.replace(/\.?0+$/, '') || '0';
 };
 
+/** Objects that actually take part in a job: on an existing, enabled layer. */
+export function activeItems(items: Item[], layers: Layer[]): Item[] {
+  const on = new Set(layers.filter((l) => l.enabled).map((l) => l.id));
+  return items.filter((i) => on.has(i.layerId));
+}
+
 /** Offset applied to the whole job, depending on the origin mode. */
 export function jobOffset(items: Item[], opt: JobOptions): Pt {
   if (opt.originMode === 'absolute') return { x: 0, y: 0 };
@@ -64,6 +70,8 @@ export function generateJob(
   deps: { rasterize?: typeof rasterize } = {},
 ): GcodeResult {
   const raster = deps.rasterize ?? rasterize;
+  // Objects on disabled layers neither run nor move the anchor point
+  items = activeItems(items, layers);
   const off = jobOffset(items, opt);
   const out: string[] = [];
   const cut: Polyline[] = [];
