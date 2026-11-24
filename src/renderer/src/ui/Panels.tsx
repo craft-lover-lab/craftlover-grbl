@@ -5,6 +5,7 @@ import { shapePaths } from '../core/shapes';
 import { useGrbl, type PortInfo } from '../machine/useGrbl';
 import { errorText, t } from '../i18n';
 import { NumField } from './DesignBars';
+import { kerfFromMeasurement } from '../core/kerf';
 
 type G = ReturnType<typeof useGrbl>;
 
@@ -191,6 +192,8 @@ export function JobPanel(p: {
         </div>
         <label>{t('jobp.sMax')}</label>
         <input type="number" value={m.sMax} onChange={(e) => p.setMachine({ ...m, sMax: +e.target.value })} />
+        <label title={t('jobp.airAssistTip')}>{t('jobp.airAssist')}</label>
+        <input type="checkbox" checked={!!m.airAssist} title={t('jobp.airAssistTip')} onChange={(e) => p.setMachine({ ...m, airAssist: e.target.checked })} />
       </div>
     </section>
   );
@@ -300,8 +303,11 @@ export function LayersPanel(p: {
   move: (from: number, to: number) => void;
   fromLib: (l: Layer) => void;
   toLib: (l: Layer) => void;
+  /** The machine switches air assist with M8/M9 */
+  airAssist: boolean;
 }) {
   const { layers, patch } = p;
+  const [kerfCalc, setKerfCalc] = useState<{ id: string; nominal: number; measured: number } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
@@ -374,6 +380,48 @@ export function LayersPanel(p: {
               <input type="number" min={0} max={100} value={l.power} onChange={(e) => patch(l.id, { power: Math.min(100, Math.max(0, +e.target.value)) })} />
               <label>{t('lp.passes')}</label>
               <input type="number" min={1} value={l.passes} onChange={(e) => patch(l.id, { passes: Math.max(1, Math.floor(+e.target.value)) })} />
+              <label title={p.airAssist ? undefined : t('lp.airOffTip')}>{t('lp.air')}</label>
+              <input
+                type="checkbox"
+                checked={!!l.air}
+                disabled={!p.airAssist}
+                title={p.airAssist ? undefined : t('lp.airOffTip')}
+                onChange={(e) => patch(l.id, { air: e.target.checked })}
+              />
+              {l.mode === 'line' && (
+                <>
+                  <label title={t('lp.kerfTip')}>{t('lp.kerf')}</label>
+                  <div className="row">
+                    <NumField value={l.kerf ?? 0} min={0} step={0.01} title={t('lp.kerfTip')} onCommit={(v) => patch(l.id, { kerf: Math.min(2, v) })} />
+                    <button className="tiny" title={t('lp.kerfCalc')} onClick={() => setKerfCalc(kerfCalc?.id === l.id ? null : { id: l.id, nominal: 20, measured: 20 })}>
+                      📏
+                    </button>
+                  </div>
+                  {kerfCalc?.id === l.id && (
+                    <div className="kerf-calc">
+                      <div className="muted">{t('lp.kerfHow')}</div>
+                      <div className="grid2">
+                        <label>{t('lp.kerfNominal')}</label>
+                        <NumField value={kerfCalc.nominal} min={1} step={1} onCommit={(v) => setKerfCalc({ ...kerfCalc, nominal: v })} />
+                        <label>{t('lp.kerfMeasured')}</label>
+                        <NumField value={kerfCalc.measured} min={0} step={0.01} onCommit={(v) => setKerfCalc({ ...kerfCalc, measured: v })} />
+                      </div>
+                      <div className="row">
+                        <span className="muted">{t('lp.kerfResult', { kerf: kerfFromMeasurement(kerfCalc.nominal, kerfCalc.measured).toFixed(3) })}</span>
+                        <button
+                          className="go"
+                          onClick={() => {
+                            patch(l.id, { kerf: +kerfFromMeasurement(kerfCalc.nominal, kerfCalc.measured).toFixed(3) });
+                            setKerfCalc(null);
+                          }}
+                        >
+                          {t('lp.kerfApply')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
               {l.mode !== 'line' && (
                 <>
                   <label>{t('lp.interval')}</label>

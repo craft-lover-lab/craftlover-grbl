@@ -45,7 +45,7 @@ const defaultLayers = (): Layer[] => [
   { ...baseLayer, id: 'image', name: t('layer.image'), color: '#333333', mode: 'image', speed: 3000, power: 50 },
   { ...baseLayer, id: 'fill', name: t('layer.fill'), color: '#18a058', mode: 'fill', speed: 6000, power: 40 },
   { ...baseLayer, id: 'score', name: t('layer.score'), color: '#2f7cf6', mode: 'line', speed: 3000, power: 30 },
-  { ...baseLayer, id: 'cut', name: t('layer.cut'), color: '#e5243b', mode: 'line', speed: 300, power: 100 },
+  { ...baseLayer, id: 'cut', name: t('layer.cut'), color: '#e5243b', mode: 'line', speed: 300, power: 100, air: true },
 ];
 
 /** Saved layers; lists saved before layer ordering existed are migrated once. */
@@ -572,6 +572,9 @@ export function App() {
   (window as any).__laserAction = async (name: string, ...args: any[]) => {
     if (name === 'lang') setLang(args[0]);
     if (name === 'wait') await new Promise((r) => setTimeout(r, args[0]));
+    if (name === 'machine') setMachine((m) => ({ ...m, ...args[0] }));
+    if (name === 'scrollSide') document.querySelector('.side')?.scrollTo(0, 1e6);
+    if (name === 'click') (document.querySelectorAll(args[0])[args[1] ?? 0] as HTMLElement | undefined)?.click();
     if (name === 'title') return document.title;
     if (name === 'select') setSelectedId(items[args[0]]?.id ?? null);
     if (name === 'preview') setShowPreview(!!args[0]);
@@ -798,6 +801,7 @@ export function App() {
             move={moveLayer}
             fromLib={(l) => setLibDlg({ target: l })}
             toLib={(l) => setLibDlg({ draft: presetFromLayer(l, { machine: machine.name, laser: machine.laser }) })}
+            airAssist={!!machine.airAssist}
           />
         </aside>
       </main>

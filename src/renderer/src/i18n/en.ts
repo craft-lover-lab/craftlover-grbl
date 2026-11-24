@@ -262,6 +262,20 @@ export const en = {
   'autosave.restore': 'Unsaved work from {time} was found — the app was closed without saving or stopped unexpectedly.\n\nRestore it?',
   'autosave.restored': 'Restored unsaved work from {time}',
 
+  // Air assist and kerf
+  'jobp.airAssist': 'Air assist (M8/M9)',
+  'jobp.airAssistTip': 'Tick only if your controller switches the air pump with M8/M9. If the firmware does not support M8, GRBL rejects it and the job stops at the first layer.',
+  'lp.air': 'Air assist',
+  'lp.airOffTip': 'Enable "Air assist (M8/M9)" in the Job panel first',
+  'lp.kerf': 'Kerf (mm)',
+  'lp.kerfTip': 'Beam width. Closed cut paths are offset by half of it: part outlines outwards, holes inwards, so parts come out at their real size. 0 = off.',
+  'lp.kerfCalc': 'Work out the kerf from a test cut',
+  'lp.kerfHow': 'Cut a square with kerf 0, measure the part with calipers and enter both sizes:',
+  'lp.kerfNominal': 'Designed (mm)',
+  'lp.kerfMeasured': 'Measured (mm)',
+  'lp.kerfResult': 'Kerf ≈ {kerf} mm',
+  'lp.kerfApply': 'Use',
+
   // Layers order, material library, test grid
   'tb.library': 'Materials',
   'tb.libraryTip': 'Material library',

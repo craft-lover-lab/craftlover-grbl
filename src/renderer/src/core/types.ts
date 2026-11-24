@@ -33,6 +33,10 @@ export interface Layer {
   bidirectional: boolean;
   /** Skip this layer when running/exporting */
   enabled: boolean;
+  /** Air assist on while this layer runs (M8/M9; only when the machine has it) */
+  air?: boolean;
+  /** Beam width to compensate on closed cut paths (mm); 0 = off. Line mode only */
+  kerf?: number;
 }
 
 export interface Bitmap {
@@ -105,6 +109,8 @@ export interface MachineProfile {
   framePower: number;
   /** Travel (G0) speed used for time estimates */
   travelSpeed: number;
+  /** The controller switches an air-assist pump with M8/M9 (coolant); off by default */
+  airAssist?: boolean;
 }
 
 export type OriginMode = 'absolute' | 'current';
@@ -146,5 +152,7 @@ export interface MaterialPreset {
   threshold: number;
   overscan: number;
   bidirectional: boolean;
+  air?: boolean;
+  kerf?: number;
   notes: string;
 }

@@ -111,6 +111,8 @@ export function MaterialLibrary(p: Props) {
                     <th>{t('lp.speed')}</th>
                     <th>{t('lp.power')}</th>
                     <th>{t('lp.passes')}</th>
+                    <th>{t('lp.air')}</th>
+                    <th>{t('lp.kerf')}</th>
                     {!onlyMachine && <th>{t('lib.f.machine')}</th>}
                     <th />
                   </tr>
@@ -125,6 +127,8 @@ export function MaterialLibrary(p: Props) {
                       <td>{x.speed}</td>
                       <td>{x.power}%</td>
                       <td>{x.passes}</td>
+                      <td>{x.air ? '✓' : ''}</td>
+                      <td>{x.mode === 'line' && x.kerf ? x.kerf : ''}</td>
                       {!onlyMachine && (
                         <td className="muted">
                           {x.machine} · {x.laser}
@@ -155,7 +159,7 @@ export function MaterialLibrary(p: Props) {
                   ))}
                   {list.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="muted">
+                      <td colSpan={11} className="muted">
                         {t('lib.empty')}
                       </td>
                     </tr>
@@ -206,6 +210,14 @@ function PresetEditor({ value, onSave, onCancel, isNew }: { value: MaterialPrese
         <NumField value={v.power} min={0} step={1} onCommit={(n) => set({ power: Math.min(100, n) })} />
         <label>{t('lp.passes')}</label>
         <NumField value={v.passes} min={1} step={1} onCommit={(n) => set({ passes: Math.max(1, Math.round(n)) })} />
+        <label>{t('lp.air')}</label>
+        <input type="checkbox" checked={!!v.air} onChange={(e) => set({ air: e.target.checked })} />
+        {v.mode === 'line' && (
+          <>
+            <label>{t('lp.kerf')}</label>
+            <NumField value={v.kerf ?? 0} min={0} step={0.01} onCommit={(n) => set({ kerf: Math.min(2, n) })} />
+          </>
+        )}
         {v.mode !== 'line' && (
           <>
             <label>{t('lp.interval')}</label>

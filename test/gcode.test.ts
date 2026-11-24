@@ -144,3 +144,28 @@ describe('SVG path parsing', () => {
     expect(parsePathData('M0 0 L1 1 M5 5 L6 6')).toHaveLength(2);
   });
 });
+
+describe('air assist and kerf in jobs', () => {
+  const withAir: MachineProfile = { ...machine, airAssist: true };
+  const engrave: Layer = { ...cut, id: 'eng', speed: 3000, power: 30, air: false };
+  const cutAir: Layer = { ...cut, air: true };
+
+  it('emits M8/M9 per layer and switches air off at the end when the machine has air assist', () => {
+    const lines = generateJob([square(10, 10, 10, 'eng'), square(40, 10)], [engrave, cutAir], withAir, abs).lines;
+    const air = lines.filter((l) => l === 'M8' || l === 'M9');
+    expect(air).toEqual(['M9', 'M8', 'M9']); // engrave off, cut on, off at the end
+    expect(lines.indexOf('M8')).toBeLessThan(lines.findIndex((l) => / F300\b/.test(l)));
+  });
+
+  it('never emits M8/M9 when the machine has no air assist configured', () => {
+    const lines = generateJob([square(40, 10)], [cutAir], machine, abs).lines;
+    expect(lines.some((l) => l === 'M8' || l === 'M9')).toBe(false);
+  });
+
+  it('applies the layer kerf to cut paths', () => {
+    const here: JobOptions = { originMode: 'current', anchor: 'bl', currentPos: { x: 10, y: 10 } };
+    const j = generateJob([square(10, 10, 20)], [{ ...cut, kerf: 0.2 }], machine, here);
+    expect(j.motion.minX).toBeCloseTo(9.9, 6);
+    expect(j.motion.maxX).toBeCloseTo(30.1, 6);
+  });
+});

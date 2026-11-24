@@ -101,3 +101,5 @@ textarea { background: #16181c; color: var(--text); border: 1px solid var(--line
 .grid-test > label { color: var(--muted); }
 /* Narrow windows: secondary toolbar buttons show only their icon (tooltip keeps the text) */
 @media (max-width: 1600px) { .toolbar .lbl { display: none; } }
+.kerf-calc { grid-column: 1 / -1; border: 1px dashed var(--line); border-radius: 5px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
+.grid2 > .row .num, .grid2 .row input.num { width: 100%; }

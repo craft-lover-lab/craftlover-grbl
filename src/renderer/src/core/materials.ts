@@ -2,7 +2,7 @@ import type { Layer, MaterialPreset } from './types';
 import { uid } from './geometry';
 
 /** Layer fields that a material preset stores and applies. */
-const SETTINGS = ['mode', 'speed', 'power', 'minPower', 'passes', 'lineInterval', 'dither', 'threshold', 'overscan', 'bidirectional'] as const;
+const SETTINGS = ['mode', 'speed', 'power', 'minPower', 'passes', 'lineInterval', 'dither', 'threshold', 'overscan', 'bidirectional', 'air', 'kerf'] as const;
 
 const ENGRAVE = { minPower: 0, lineInterval: 0.1, dither: 'floyd' as const, threshold: 128, overscan: 2.5, bidirectional: true };
 
@@ -14,6 +14,9 @@ export function builtinPresets(): MaterialPreset[] {
   const base = { machine: 'Sculpfun S30', laser: '10W diode', notes: 'Starting point — run a test grid on your own material first.', ...ENGRAVE };
   const p = (material: string, thickness: number, operation: string, mode: MaterialPreset['mode'], speed: number, power: number, passes = 1): MaterialPreset => ({
     ...base,
+    // Cuts are cleaner and safer with air assist; kerf stays 0 until measured on your machine
+    air: operation === 'Cut',
+    kerf: 0,
     id: `builtin-${material}-${thickness}-${operation}`.toLowerCase().replace(/[^a-z0-9.-]+/g, '-'),
     material,
     thickness,
@@ -79,6 +82,8 @@ export function normalizePresets(data: unknown): MaterialPreset[] {
       threshold: Math.min(254, Math.max(1, num(x.threshold, 128))),
       overscan: Math.max(0, num(x.overscan, 2.5)),
       bidirectional: x.bidirectional !== false,
+      air: x.air === true,
+      kerf: Math.min(2, Math.max(0, num(x.kerf, 0))),
       notes: str(x.notes),
     }))
     .filter((p) => p.material || p.operation);

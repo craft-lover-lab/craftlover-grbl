@@ -247,6 +247,20 @@ export const vi: Record<Key, string> = {
   'autosave.restore': 'Tìm thấy bản làm việc chưa lưu lúc {time} — phần mềm đã bị đóng khi chưa lưu hoặc bị tắt đột ngột.\n\nKhôi phục lại?',
   'autosave.restored': 'Đã khôi phục bản làm việc chưa lưu lúc {time}',
 
+  // Air assist and kerf
+  'jobp.airAssist': 'Thổi khí (M8/M9)',
+  'jobp.airAssistTip': 'Chỉ tích nếu bo điều khiển bật/tắt bơm khí bằng lệnh M8/M9. Nếu firmware không hỗ trợ M8, GRBL sẽ báo lỗi và job dừng ngay ở lớp đầu tiên.',
+  'lp.air': 'Thổi khí',
+  'lp.airOffTip': 'Hãy bật "Thổi khí (M8/M9)" trong bảng Công việc trước',
+  'lp.kerf': 'Kerf (mm)',
+  'lp.kerfTip': 'Độ rộng vết cắt. Đường cắt kín được bù một nửa giá trị này: viền chi tiết nới ra ngoài, lỗ thu vào trong, để chi tiết đúng kích thước. 0 = tắt.',
+  'lp.kerfCalc': 'Tính kerf từ một lần cắt thử',
+  'lp.kerfHow': 'Cắt một hình vuông với kerf = 0, đo chi tiết bằng thước kẹp rồi nhập cả hai kích thước:',
+  'lp.kerfNominal': 'Thiết kế (mm)',
+  'lp.kerfMeasured': 'Đo được (mm)',
+  'lp.kerfResult': 'Kerf ≈ {kerf} mm',
+  'lp.kerfApply': 'Dùng',
+
   // Layers order, material library, test grid
   'tb.library': 'Vật liệu',
   'tb.libraryTip': 'Thư viện vật liệu',

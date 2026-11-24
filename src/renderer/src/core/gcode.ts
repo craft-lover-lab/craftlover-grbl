@@ -1,6 +1,7 @@
 import type { Bounds, Item, JobOptions, Layer, MachineProfile, Polyline, Pt } from './types';
 import { anchorPoint, copyOffsets, isEmpty, itemsBounds, optimizeOrder, placedPaths } from './geometry';
 import { rasterize, type Raster } from './raster';
+import { kerfOffset } from './kerf';
 
 const f = (n: number) => {
   const s = n.toFixed(3);
@@ -94,6 +95,8 @@ export function generateJob(
 
   for (const { layer, items: its } of orderedWork(items, layers)) {
     out.push(`; ---- Layer ${layer.id} (${layer.mode}) speed ${layer.speed} mm/min, power ${layer.power}%, ${layer.passes} pass(es)`);
+    // Air assist per layer (M8 on / M9 off) — only for machines that have it wired to coolant
+    if (m.airAssist) out.push(layer.air ? 'M8' : 'M9');
     // M4 = dynamic power: GRBL lowers power when the head slows down in corners → more even lines
     out.push('M4 S0');
     for (let pass = 0; pass < Math.max(1, layer.passes); pass++) {
@@ -102,7 +105,9 @@ export function generateJob(
         const all: Polyline[] = [];
         for (const it of its)
           for (const o of copyOffsets(it))
-            for (const pl of placedPaths(it, { x: o.x + off.x, y: o.y + off.y })) all.push(pl);
+            // Kerf: grow part outlines / shrink holes by half the beam width (per object, so
+            // holes are recognised inside their own part)
+            for (const pl of kerfOffset(placedPaths(it, { x: o.x + off.x, y: o.y + off.y }), layer.kerf ?? 0)) all.push(pl);
         const s = S(layer, 1);
         let first = true;
         for (const pl of optimizeOrder(all, pos)) {
@@ -171,6 +176,7 @@ export function generateJob(
   }
 
   out.push('M5 S0');
+  if (m.airAssist) out.push('M9');
   g0(startPos);
   out.push('M2');
   return { lines: out, bounds: jobBounds(items, opt), motion: gcodeBounds(out), seconds, preview: { cut, travel } };
