@@ -291,8 +291,6 @@ export const en = {
   'prog.tip': 'Progress is estimated from the toolpath ({done}/{total} lines acknowledged)',
 
   // STOP behaviour, GRBL error help
-  'jobp.returnAfterStop': 'Return automatically after STOP',
-  'jobp.returnAfterStopTip': 'Off (recommended): after STOP the head stays where it stopped and a "Return to start" button appears. On: the head moves back by itself once the machine is idle — only if you are sure nothing is in the way.',
   'stop.returning': 'Returning to the start position ({x}, {y})',
   'stop.locked': 'The machine is locked by an alarm after stopping — click "Unlock $X" (or Home), then ⌂ to go back to the origin',
   'grblerr.5': 'Homing is not enabled on this machine ($22=0). Use ⌂ to go to the work origin instead.',
@@ -405,7 +403,7 @@ export const en = {
   'bool.openConfirm': '{n} of the selected objects contain open lines (no area). Weld/subtract/intersect only uses closed shapes, so those lines will be deleted together with the originals. Continue? (Undo with Ctrl+Z)',
 
   // STOP lock, return after STOP, Fire maximum on-time
-  'err.stopping': 'The machine is still stopping — wait a moment until it has reset',
+  'err.stopping': 'The machine is still stopping — commands are locked until it reports Idle (click "Unlock $X" if it is in Alarm)',
   'tb.stopping': 'Stopping…',
   'stop.returnBtn': 'Return to start',
   'stop.returnTip': 'Move the head back to where the job started. Check the bed first: nothing in the way, the part has not shifted, no flame.',
@@ -413,8 +411,11 @@ export const en = {
   'stop.notIdle': 'The machine is not ready yet ({state}). Wait until it is Idle.',
   'stop.dismiss': 'Hide (stay here)',
   'jobp.fireMax': 'Fire auto-off (s)',
-  'jobp.fireMaxTip': 'The positioning beam switches itself off after this many seconds. 0 = never (not recommended).',
+  'jobp.fireMaxTip': 'The positioning beam switches itself off after this many seconds (10–300). It cannot be left on without a limit.',
   'jog.fireAutoOff': 'It switches off by itself in {s} s.',
+
+  // STOP not confirmed
+  'stop.notConfirmed': 'STOP was not confirmed by the controller: all commands stay locked. Check the machine (power, cable, laser off), then Disconnect and Connect again.',
 };
 
 export type Key = keyof typeof en;

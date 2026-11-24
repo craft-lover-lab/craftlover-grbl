@@ -70,7 +70,8 @@ export interface GrblOptions {
   manualDrainTimeoutMs?: number;
   /** How long to wait for a fresh status report (ms) */
   statusTimeoutMs?: number;
-  /** STOP: unlock commands after this long even if the controller never confirms the reset (ms) */
+  /** STOP: report a problem when the controller has not confirmed the reset after this long (ms).
+   *  The lock stays on (fail closed): only a confirmed Idle or a reconnect releases it. */
   stoppingTimeoutMs?: number;
 }
 
@@ -110,9 +111,11 @@ export class GrblConnection {
   /** True while we are resetting the controller ourselves (STOP / safety stop) */
   private resetting = false;
   /**
-   * STOP / safety stop in progress, from the feed hold until the controller has restarted and
-   * sent a status report again. All new commands are refused meanwhile, so nothing can slip in
-   * between the hold and the reset, or right after the restart.
+   * STOP / safety stop in progress, from the feed hold until the restarted controller reports
+   * Idle. All new commands are refused meanwhile (fail closed), so nothing can slip in between
+   * the hold and the reset, or right after the restart. After the restart, an Alarm only lets
+   * the unlock/homing and read-only commands through. A controller that never confirms keeps
+   * the lock until the user reconnects.
    */
   private stopping: { afterReset: boolean; timer: ReturnType<typeof setTimeout> } | null = null;
   /** Last machine state from a status report, e.g. "Idle", "Run", "Hold:0", "Alarm" */
@@ -196,7 +199,7 @@ export class GrblConnection {
    */
   send(lines: string[]) {
     if (!this.t) throw new Error('NOT_CONNECTED');
-    if (this.stopping) throw new Error('STOPPING');
+    if (this.stopping && !lines.every((l) => this.allowedWhileStopping(l))) throw new Error('STOPPING');
     if (this.jobActive) throw new Error('BUSY');
     for (const l of lines) {
       const s = l.trim();
@@ -423,13 +426,21 @@ export class GrblConnection {
     this.realtime(0x18);
   }
 
+  /**
+   * While stopping: nothing before the controller has restarted. After the restart, only what
+   * gets a locked machine going again ($X unlock, $H homing) and read-only queries — GRBL itself
+   * refuses motion in Alarm, and the lock ends as soon as it reports Idle.
+   */
+  private allowedWhileStopping(line: string) {
+    if (!this.stopping?.afterReset) return false;
+    return /^\$(X|H|\$|I|G|#|N)$/i.test(line.trim());
+  }
+
   private beginStopping() {
     if (this.stopping) clearTimeout(this.stopping.timer);
-    // Fallback for controllers that never send a banner after the reset: unlock eventually
+    // No confirmation in time: say so, but keep everything locked (a timeout proves nothing)
     const timer = setTimeout(() => {
-      if (!this.stopping) return;
-      this.ev.onLine('[STOP] the controller did not confirm the reset; check the machine before continuing');
-      this.endStopping();
+      if (this.stopping) this.ev.onLine('[STOP] NOT_CONFIRMED');
     }, this.opt.stoppingTimeoutMs ?? 6000);
     const was = !!this.stopping;
     this.stopping = { afterReset: false, timer };
@@ -563,7 +574,8 @@ export class GrblConnection {
     // Done only when the sync dwell was acknowledged and the machine reports Idle afterwards
     if (this.job.state === 'completing' && this.syncAcked && state === 'Idle') this.endJob('done');
     this.settle(this.statusWaiters, this.machineState);
-    if (confirmsStop) this.endStopping();
+    // Unlock only on Idle; Alarm / Door / Hold after the restart keep the lock
+    if (confirmsStop && state === 'Idle') this.endStopping();
   }
 
   private startPolling() {

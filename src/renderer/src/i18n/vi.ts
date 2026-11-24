@@ -276,8 +276,6 @@ export const vi: Record<Key, string> = {
   'prog.tip': 'Tiến độ được ước tính theo đường chạy ({done}/{total} dòng máy đã nhận)',
 
   // STOP behaviour, GRBL error help
-  'jobp.returnAfterStop': 'Tự về sau khi DỪNG',
-  'jobp.returnAfterStopTip': 'Tắt (khuyên dùng): sau khi DỪNG, đầu laser đứng yên tại chỗ và hiện nút "Về vị trí bắt đầu". Bật: đầu laser tự chạy về khi máy rảnh — chỉ bật khi chắc chắn không có vật cản.',
   'stop.returning': 'Đang về vị trí bắt đầu ({x}, {y})',
   'stop.locked': 'Máy bị khóa do báo động sau khi dừng — bấm "Mở khóa $X" (hoặc Homing), rồi bấm ⌂ để về gốc',
   'grblerr.5': 'Máy này chưa bật Homing ($22=0). Hãy dùng nút ⌂ để về gốc làm việc.',
@@ -389,7 +387,7 @@ export const vi: Record<Key, string> = {
   'bool.openConfirm': '{n} đối tượng đang chọn có đường hở (không có diện tích). Gộp/trừ/giao chỉ dùng hình kín, nên các đường hở này sẽ bị xóa cùng hình gốc. Tiếp tục? (Hoàn tác bằng Ctrl+Z)',
 
   // STOP lock, return after STOP, Fire maximum on-time
-  'err.stopping': 'Máy đang dừng — chờ một chút cho máy reset xong',
+  'err.stopping': 'Máy đang dừng — lệnh bị khóa cho tới khi máy báo Idle (nếu máy báo Alarm, bấm "Mở khóa $X")',
   'tb.stopping': 'Đang dừng…',
   'stop.returnBtn': 'Về vị trí bắt đầu',
   'stop.returnTip': 'Đưa đầu laser về chỗ bắt đầu job. Kiểm tra bàn máy trước: không có vật cản, phôi không bị xê dịch, không có lửa.',
@@ -397,6 +395,9 @@ export const vi: Record<Key, string> = {
   'stop.notIdle': 'Máy chưa sẵn sàng ({state}). Chờ đến khi máy ở trạng thái Idle.',
   'stop.dismiss': 'Ẩn (đứng yên tại chỗ)',
   'jobp.fireMax': 'Fire tự tắt sau (giây)',
-  'jobp.fireMaxTip': 'Tia định vị tự tắt sau số giây này. 0 = không bao giờ (không khuyến khích).',
+  'jobp.fireMaxTip': 'Tia định vị tự tắt sau số giây này (10–300). Không thể để tia bật không giới hạn.',
   'jog.fireAutoOff': 'Tia sẽ tự tắt sau {s} giây.',
+
+  // STOP not confirmed
+  'stop.notConfirmed': 'Bo điều khiển chưa xác nhận đã DỪNG: mọi lệnh vẫn bị khóa. Kiểm tra máy (nguồn, cáp, laser đã tắt) rồi bấm Ngắt kết nối và Kết nối lại.',
 };

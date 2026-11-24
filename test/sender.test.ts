@@ -190,6 +190,23 @@ describe('errors and interruptions', () => {
     expect(() => conn.send(['G90 G0 X0 Y0'])).not.toThrow(); // can return to the origin
   });
 
+  it('after the restart an Alarm keeps motion locked; only unlock/homing pass, Idle releases', async () => {
+    await conn.runJob(job(10));
+    mock.step(2);
+    conn.abort();
+    mock.holdComplete();
+    mock.reportStatus(); // reset
+    mock.state = 'Alarm'; // e.g. a board that boots locked
+    mock.reportStatus();
+    expect(conn.isStopping).toBe(true);
+    expect(() => conn.send(['G0 X0'])).toThrow('STOPPING');
+    expect(() => conn.send(['$J=G91 X1 F100'])).toThrow('STOPPING');
+    expect(() => conn.send(['$X'])).not.toThrow();
+    mock.state = 'Idle';
+    mock.reportStatus();
+    expect(conn.isStopping).toBe(false);
+  });
+
   it('refuses every new command between STOP and the end of the reset (regression)', async () => {
     const stopping: boolean[] = [];
     const c = new GrblConnection(
@@ -221,7 +238,7 @@ describe('errors and interruptions', () => {
     c.close();
   });
 
-  it('unlocks after a timeout when the controller never confirms the reset', async () => {
+  it('stays locked (fail closed) when the controller never confirms the reset', async () => {
     vi.useFakeTimers();
     try {
       const c = new GrblConnection({ onLine: (l) => log.push(l), onProgress: () => {}, onClose: () => {} }, { open: mock.factory, pollMs: 0, stoppingTimeoutMs: 2000 });
@@ -232,9 +249,17 @@ describe('errors and interruptions', () => {
       mock.silent = true; // controller goes silent: no banner, no status
       vi.advanceTimersByTime(1600);
       expect(c.isStopping).toBe(true);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(60_000);
+      expect(c.isStopping).toBe(true); // a timeout is not a confirmation
+      expect(log).toContain('[STOP] NOT_CONFIRMED');
+      expect(() => c.send(['$J=G91 X10 F1000'])).toThrow('STOPPING');
+      expect(() => c.send(['$X'])).toThrow('STOPPING'); // not even unlock: the reset was never seen
+      // Reconnecting is the way out
+      c.close();
+      mock.silent = false;
+      mock.closed = false;
+      await c.open('MOCK', 115200);
       expect(c.isStopping).toBe(false);
-      expect(log.some((l) => l.includes('did not confirm'))).toBe(true);
     } finally {
       vi.useRealTimers();
     }

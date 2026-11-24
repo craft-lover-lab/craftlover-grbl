@@ -123,13 +123,11 @@ export interface MachineProfile {
   travelSpeed: number;
   /** The controller switches an air-assist pump with M8/M9 (coolant); off by default */
   airAssist?: boolean;
-  /** After STOP, move the head back to where the job started (once the machine is idle) */
-  returnAfterStop?: boolean;
   /** Frame with a visible low-power beam (framePower) instead of the laser off */
   frameBeam?: boolean;
   /** Power of the positioning beam ("Fire"), % of S max */
   firePower?: number;
-  /** Fire switches itself off after this many seconds; 0 = never */
+  /** Fire switches itself off after this many seconds (FIRE_MAX_RANGE) */
   fireMaxS?: number;
 }
 

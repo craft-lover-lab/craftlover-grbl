@@ -97,6 +97,7 @@ export function useGrbl() {
         return;
       }
       if (/^Grbl|^GrblHAL/i.test(line)) setVersion(line);
+      if (line === '[STOP] NOT_CONFIRMED') return push(`⚠ ${t('stop.notConfirmed')}`);
       const am = line.match(/^ALARM:(\d+)/);
       const em = line.match(/^error:(\d+)/);
       if (am && ALARMS.has(am[1])) push(`${line}  ← ${t(`alarm.${am[1]}` as Key)}`);

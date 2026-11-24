@@ -22,6 +22,7 @@ import { itemWithPaths, worldPaths } from '../core/nodes';
 import { builtinPresets, normalizePresets, presetFromLayer, presetToLayer } from '../core/materials';
 import { buildTestGrid, type TestGridOptions } from '../core/testGrid';
 import { PALETTE, Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
+import { clampFireMax } from './Panels';
 import { AirBadge, ConnectionPanel, ItemPanel, JobPanel, JogPanel, LayersPanel } from './Panels';
 import { alignItems, cloneItems, distributeItems, flipItems, moveItems, rotateItems, scaleItems, selBounds } from './designOps';
 
@@ -40,11 +41,8 @@ const DEFAULT_MACHINE: MachineProfile = {
   firePower: 3,
   // Air assist via M8/M9 (standard GRBL 1.1 accepts it even when no pump is wired)
   airAssist: true,
-  // After STOP the machine stays where it is; a "Return to start" button is offered instead.
-  // Moving on its own after an emergency-style stop would be unsafe (shifted part, fire, jam).
-  returnAfterStop: false,
-  // Fire switches itself off after 5 minutes
-  fireMaxS: 300,
+  // Fire switches itself off after a minute (FIRE_MAX_RANGE)
+  fireMaxS: 60,
   travelSpeed: 6000,
 };
 
@@ -55,12 +53,9 @@ function initialMachine(): MachineProfile {
   if (m.frameBeam === undefined) m = { ...m, frameBeam: true, framePower: m.framePower > 0 ? m.framePower : 1 };
   // Air assist used to be an opt-in machine option; it is on by default now
   if (m.airAssist === undefined) m = { ...m, airAssist: true };
-  // Automatic return after STOP used to be on by default: switch it off once (it stays available)
-  if (localStorage.getItem('stopPolicy') !== '2') {
-    m = { ...m, returnAfterStop: false };
-    localStorage.setItem('stopPolicy', '2');
-  }
-  if (m.fireMaxS === undefined) m = { ...m, fireMaxS: 300 };
+  // After STOP the machine never moves on its own any more (the old option is dropped)
+  delete (m as { returnAfterStop?: boolean }).returnAfterStop;
+  m = { ...m, fireMaxS: clampFireMax(m.fireMaxS ?? 60) };
   return m;
 }
 
@@ -275,18 +270,14 @@ export function App() {
   const running = g.jobActive;
 
   // ---------- After STOP: go back to where the job started ----------
+  // After STOP the head stays where it stopped (a shifted part, a flame or a jam may be the
+  // reason for stopping). Going back is a separate, confirmed action.
   const jobStart = useRef<Pt>({ x: 0, y: 0 });
-  const pendingReturn = useRef<{ pos: Pt; until: number } | null>(null);
   /** After STOP: where the "Return to start" button would take the head */
   const [returnOffer, setReturnOffer] = useState<Pt | null>(null);
   useEffect(() => {
     const p = g.progress;
-    if (p?.state === 'aborted' && p.reason === 'stopped') {
-      const pos = jobStart.current;
-      // Only when the user opted in; otherwise the machine stays put and a button is offered
-      if (machine.returnAfterStop) setTimeout(() => (pendingReturn.current = { pos, until: Date.now() + 15000 }), 400);
-      else setReturnOffer(pos);
-    }
+    if (p?.state === 'aborted' && p.reason === 'stopped') setReturnOffer(jobStart.current);
     if (p?.state === 'running') setReturnOffer(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [g.progress?.state]);
@@ -304,21 +295,6 @@ export function App() {
     g.push(t('stop.returning', { x: pos.x.toFixed(1), y: pos.y.toFixed(1) }));
     g.send(['M5 S0', `G90 G0 X${pos.x.toFixed(3)} Y${pos.y.toFixed(3)}`]);
   }
-  useEffect(() => {
-    const r = pendingReturn.current;
-    if (!r) return;
-    const st = g.status.state.split(':')[0];
-    if (Date.now() > r.until) pendingReturn.current = null;
-    else if (st === 'Alarm') {
-      pendingReturn.current = null;
-      g.push(`⚠ ${t('stop.locked')}`);
-    } else if (st === 'Idle' && !g.jobActive && !g.stopping) {
-      pendingReturn.current = null;
-      g.push(t('stop.returning', { x: r.pos.x.toFixed(1), y: r.pos.y.toFixed(1) }));
-      g.send(['M5 S0', `G90 G0 X${r.pos.x.toFixed(3)} Y${r.pos.y.toFixed(3)}`]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g.status]);
 
   // ---------- Progress: time-weighted, with elapsed and remaining time ----------
   const [plan, setPlan] = useState<{ cum: number[]; total: number } | null>(null);
@@ -997,7 +973,7 @@ export function App() {
         </div>
         <aside className="side">
           <ConnectionPanel g={g} machine={machine} setMachine={setMachine} locked={running} />
-          <JogPanel g={g} jog={jog} disabled={!g.connected || running || g.stopping} sMax={machine.sMax} firePower={machine.firePower ?? 3} fireMaxS={machine.fireMaxS ?? 300} />
+          <JogPanel g={g} jog={jog} disabled={!g.connected || running || g.stopping} sMax={machine.sMax} firePower={machine.firePower ?? 3} fireMaxS={clampFireMax(machine.fireMaxS ?? 60)} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
           {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} onEditText={editItem} onEditNodes={(it) => (setSelectedIds([it.id]), setTool('node'))} />}
           <LayersPanel

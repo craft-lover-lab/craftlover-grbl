@@ -84,6 +84,9 @@ export function ConnectionPanel({ g, machine, setMachine, locked }: { g: G; mach
 // ---------- Jogging, origin, homing ----------
 /** Warn when the positioning beam has been on this long (s) */
 const FIRE_WARN_S = 30;
+/** Fire's maximum on-time can be set within these limits (s); it cannot be switched off */
+export const FIRE_MAX_RANGE = { min: 10, max: 300 };
+export const clampFireMax = (s: number) => Math.min(FIRE_MAX_RANGE.max, Math.max(FIRE_MAX_RANGE.min, Math.round(s) || 60));
 export function JogPanel({
   g,
   jog,
@@ -162,10 +165,10 @@ export function JogPanel({
           {firing ? `🔴 ${t('jog.fireOff')} · ${fireSecs}s` : `🔆 ${t('jog.fire', { power: firePower })}`}
         </button>
       </div>
-      {firing && fireSecs >= FIRE_WARN_S && (
+      {firing && fireSecs >= Math.min(FIRE_WARN_S, fireMaxS / 2) && (
         <div className="fire-warn">
           {t('jog.fireLong', { s: fireSecs })}
-          {fireMaxS > 0 && ` ${t('jog.fireAutoOff', { s: Math.max(0, fireMaxS - fireSecs) })}`}
+          {` ${t('jog.fireAutoOff', { s: Math.max(0, fireMaxS - fireSecs) })}`}
         </div>
       )}
       <div className="row wrap" title={t('jog.airTip')}>
@@ -237,9 +240,7 @@ export function JobPanel(p: {
         <label>{t('jobp.firePower')}</label>
         <input type="number" step={1} min={1} max={10} value={m.firePower ?? 3} onChange={(e) => p.setMachine({ ...m, firePower: Math.min(10, Math.max(1, +e.target.value || 1)) })} />
         <label title={t('jobp.fireMaxTip')}>{t('jobp.fireMax')}</label>
-        <input type="number" step={30} min={0} max={3600} value={m.fireMaxS ?? 300} title={t('jobp.fireMaxTip')} onChange={(e) => p.setMachine({ ...m, fireMaxS: Math.min(3600, Math.max(0, Math.round(+e.target.value) || 0)) })} />
-        <label title={t('jobp.returnAfterStopTip')}>{t('jobp.returnAfterStop')}</label>
-        <input type="checkbox" checked={!!m.returnAfterStop} title={t('jobp.returnAfterStopTip')} onChange={(e) => p.setMachine({ ...m, returnAfterStop: e.target.checked })} />
+        <NumField value={m.fireMaxS ?? 60} step={10} min={FIRE_MAX_RANGE.min} title={t('jobp.fireMaxTip')} onCommit={(v) => p.setMachine({ ...m, fireMaxS: clampFireMax(v) })} />
         <label title={t('jobp.airAssistTip')}>{t('jobp.airAssist')}</label>
         <input type="checkbox" checked={!!m.airAssist} title={t('jobp.airAssistTip')} onChange={(e) => p.setMachine({ ...m, airAssist: e.target.checked })} />
       </div>
