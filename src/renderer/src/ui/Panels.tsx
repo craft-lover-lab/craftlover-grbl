@@ -82,24 +82,30 @@ export function ConnectionPanel({ g, machine, setMachine, locked }: { g: G; mach
 }
 
 // ---------- Jogging, origin, homing ----------
-const FIRE_SECONDS = 10;
-export function JogPanel({ g, jog, disabled, sMax }: { g: G; jog: (dx: number, dy: number, step: number, feed: number) => void; disabled: boolean; sMax: number }) {
+/** Warn when the positioning beam has been on this long (s) */
+const FIRE_WARN_S = 30;
+export function JogPanel({ g, jog, disabled, sMax, firePower }: { g: G; jog: (dx: number, dy: number, step: number, feed: number) => void; disabled: boolean; sMax: number; firePower: number }) {
   const [step, setStep] = useState(10);
   const [feed, setFeed] = useState(3000);
-  // Fire 1%: a very weak beam to see the position. The main process switches it off after
-  // FIRE_SECONDS on its own (even if this window hangs); here we only show the countdown.
-  const [fireLeft, setFireLeft] = useState(0);
-  const firing = fireLeft > 0;
-  useEffect(() => window.laser.onFire(({ on, seconds }) => setFireLeft(on ? seconds : 0)), []);
+  // Fire: a low-power beam to see where the laser points. It stays on until clicked again
+  // (the main process still switches it off before a job, on STOP and on disconnect).
+  // After FIRE_WARN_S seconds a warning reminds not to leave it on one spot.
+  const [fireSince, setFireSince] = useState<number | null>(null);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => window.laser.onFire(({ on }) => setFireSince(on ? Date.now() : null)), []);
   useEffect(() => {
-    if (!firing) return;
-    const id = setTimeout(() => setFireLeft((n) => Math.max(0, n - 1)), 1000);
-    return () => clearTimeout(id);
-  }, [fireLeft, firing]);
+    if (fireSince === null) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [fireSince]);
+  const firing = fireSince !== null;
+  const fireSecs = firing ? Math.floor((now - fireSince) / 1000) : 0;
   const fire = async () => {
     if (firing) return window.laser.fire(false);
-    await window.laser.fire(true, Math.round(sMax * 0.01), FIRE_SECONDS).catch((e: Error) => g.push(`⚠ ${e.message}`));
+    setNow(Date.now());
+    await window.laser.fire(true, Math.round((sMax * firePower) / 100)).catch((e: Error) => g.push(`⚠ ${e.message}`));
   };
+
 
   return (
     <section className="panel">
@@ -137,9 +143,15 @@ export function JogPanel({ g, jog, disabled, sMax }: { g: G; jog: (dx: number, d
         <button disabled={!g.connected} onClick={() => g.send('$X')} title={t('jog.unlockTip')}>
           {t('jog.unlock')}
         </button>
-        <button disabled={disabled} className={firing ? 'warn' : ''} onClick={fire} title={t('jog.fireTip')}>
-          {firing ? `🔴 ${t('jog.fireOff')} (${fireLeft}s)` : `🔆 ${t('jog.fire')}`}
+        <button disabled={disabled} className={firing ? 'firing' : ''} onClick={fire} title={t('jog.fireTip')}>
+          {firing ? `🔴 ${t('jog.fireOff')} · ${fireSecs}s` : `🔆 ${t('jog.fire', { power: firePower })}`}
         </button>
+      </div>
+      {firing && fireSecs >= FIRE_WARN_S && <div className="fire-warn">{t('jog.fireLong', { s: fireSecs })}</div>}
+      <div className="row wrap" title={t('jog.airTip')}>
+        <label>{t('jog.airTest')}</label>
+        <button disabled={disabled} onClick={() => g.send('M8')}>{t('jog.airOn')}</button>
+        <button disabled={disabled} onClick={() => g.send('M9')}>{t('jog.airOff')}</button>
       </div>
     </section>
   );
@@ -192,6 +204,8 @@ export function JobPanel(p: {
         </div>
         <label>{t('jobp.sMax')}</label>
         <input type="number" value={m.sMax} onChange={(e) => p.setMachine({ ...m, sMax: +e.target.value })} />
+        <label>{t('jobp.firePower')}</label>
+        <input type="number" step={1} min={1} max={10} value={m.firePower ?? 3} onChange={(e) => p.setMachine({ ...m, firePower: Math.min(10, Math.max(1, +e.target.value || 1)) })} />
         <label title={t('jobp.airAssistTip')}>{t('jobp.airAssist')}</label>
         <input type="checkbox" checked={!!m.airAssist} title={t('jobp.airAssistTip')} onChange={(e) => p.setMachine({ ...m, airAssist: e.target.checked })} />
       </div>
@@ -380,14 +394,12 @@ export function LayersPanel(p: {
               <input type="number" min={0} max={100} value={l.power} onChange={(e) => patch(l.id, { power: Math.min(100, Math.max(0, +e.target.value)) })} />
               <label>{t('lp.passes')}</label>
               <input type="number" min={1} value={l.passes} onChange={(e) => patch(l.id, { passes: Math.max(1, Math.floor(+e.target.value)) })} />
-              <label title={p.airAssist ? undefined : t('lp.airOffTip')}>{t('lp.air')}</label>
-              <input
-                type="checkbox"
-                checked={!!l.air}
-                disabled={!p.airAssist}
-                title={p.airAssist ? undefined : t('lp.airOffTip')}
-                onChange={(e) => patch(l.id, { air: e.target.checked })}
-              />
+              <label>{t('lp.air')}</label>
+              <div className="row">
+                {/* Always editable; when the machine option is off the pump is not switched, so say so plainly */}
+                <input type="checkbox" checked={!!l.air} onChange={(e) => patch(l.id, { air: e.target.checked })} />
+                {l.air && !p.airAssist && <span className="air-warn">⚠ {t('lp.airOffTip')}</span>}
+              </div>
               {l.mode === 'line' && (
                 <>
                   <label title={t('lp.kerfTip')}>{t('lp.kerf')}</label>

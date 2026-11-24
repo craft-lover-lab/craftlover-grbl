@@ -108,9 +108,9 @@ export const en = {
   'jog.homingTip': 'Run the homing cycle (machines with limit switches)',
   'jog.unlock': 'Unlock $X',
   'jog.unlockTip': 'Clear an alarm lock',
-  'jog.fire': 'Fire 1%',
+  'jog.fire': 'Fire {power}%',
   'jog.fireOff': 'Laser off',
-  'jog.fireTip': 'Turn on a 1% beam for positioning — it switches off by itself after 10 seconds',
+  'jog.fireTip': 'Turn on a low-power beam to see where the laser points. It stays on until you click again (and is switched off before a job, on STOP and on disconnect).',
   // Job panel
   'jobp.title': 'Job',
   'jobp.absolute': 'Work origin (position on the bed)',
@@ -266,7 +266,7 @@ export const en = {
   'jobp.airAssist': 'Air assist (M8/M9)',
   'jobp.airAssistTip': 'Tick only if your controller switches the air pump with M8/M9. If the firmware does not support M8, GRBL rejects it and the job stops at the first layer.',
   'lp.air': 'Air assist',
-  'lp.airOffTip': 'Enable "Air assist (M8/M9)" in the Job panel first',
+  'lp.airOffTip': 'Not sent: "Air assist (M8/M9)" is off in the Job panel',
   'lp.kerf': 'Kerf (mm)',
   'lp.kerfTip': 'Beam width. Closed cut paths are offset by half of it: part outlines outwards, holes inwards, so parts come out at their real size. 0 = off.',
   'lp.kerfCalc': 'Work out the kerf from a test cut',
@@ -275,6 +275,20 @@ export const en = {
   'lp.kerfMeasured': 'Measured (mm)',
   'lp.kerfResult': 'Kerf ≈ {kerf} mm',
   'lp.kerfApply': 'Use',
+
+  // Progress, frame beam, fire, air pump
+  'tb.frameBeamOn': 'Frame with a visible beam ({power}% — set in the Job panel). Click to frame with the laser off.',
+  'tb.frameBeamOff': 'Frame with the laser off. Click to frame with a visible low-power beam.',
+  'jobp.firePower': 'Fire power (%)',
+  'jog.fireLong': '⚠ The beam has been on for {s} s — do not leave it on one spot',
+  'jog.airTest': 'Air pump',
+  'jog.airOn': 'On (M8)',
+  'jog.airOff': 'Off (M9)',
+  'jog.airTip': 'Check whether your controller switches the air pump: if "On" starts it, enable "Air assist (M8/M9)" in the Job panel',
+  'job.airNotEnabled': 'Layers with air assist: {layers}. "Air assist (M8/M9)" is off in the Job panel, so the pump will not be switched — turn the option on, or start the pump by hand.',
+  'prog.elapsed': 'Elapsed {t}',
+  'prog.remaining': '≈ {t} left',
+  'prog.tip': 'Progress is estimated from the toolpath ({done}/{total} lines acknowledged)',
 
   // Layers order, material library, test grid
   'tb.library': 'Materials',

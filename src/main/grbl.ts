@@ -42,7 +42,7 @@ export interface GrblEvents {
   onProgress: (p: JobProgress) => void;
   onClose: () => void;
   /** The positioning beam ("Fire") was switched on or off */
-  onFire?: (on: boolean, seconds: number) => void;
+  onFire?: (on: boolean) => void;
 }
 
 /** Byte stream to the controller (a serial port in the app, a mock in tests). */
@@ -99,8 +99,8 @@ export class GrblConnection {
   private epoch = 0;
   /** Pending "reset once the hold has settled" after a G-code error */
   private safety: { epoch: number; timer: ReturnType<typeof setTimeout> } | null = null;
-  /** Auto-off timer for the positioning beam */
-  private fireTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The positioning beam (Fire) is on */
+  private beamOn = false;
   /** True while we are resetting the controller ourselves (STOP / safety stop) */
   private resetting = false;
   /** Last machine state from a status report, e.g. "Idle", "Run", "Hold:0", "Alarm" */
@@ -131,7 +131,7 @@ export class GrblConnection {
   }
 
   get firing() {
-    return !!this.fireTimer;
+    return this.beamOn;
   }
 
   async open(path: string, baud: number) {
@@ -234,26 +234,20 @@ export class GrblConnection {
   }
 
   /**
-   * Positioning beam: constant low power (M3) that the main process switches off
-   * after `seconds`, even if the UI hangs. Refused while a job is active.
+   * Positioning beam: constant low power (M3). It stays on until switched off — the UI warns
+   * when it has been on for a while — but it is always switched off before a job, on STOP,
+   * reset, alarm and disconnect. Refused while a job is active.
    */
-  fire(sValue: number, seconds: number) {
+  fire(sValue: number) {
     this.send([`M3 S${Math.max(0, Math.round(sValue))}`, 'G1 F1000']);
-    if (this.fireTimer) clearTimeout(this.fireTimer);
-    const epoch = this.epoch;
-    this.fireTimer = setTimeout(() => {
-      this.fireTimer = null;
-      if (epoch === this.epoch) this.fireOff(true);
-    }, seconds * 1000);
-    this.ev.onFire?.(true, seconds);
+    this.beamOn = true;
+    this.ev.onFire?.(true);
   }
 
   /** Switch the positioning beam off (no-op when it is not on). */
-  fireOff(auto = false) {
-    if (this.fireTimer) clearTimeout(this.fireTimer);
-    const wasOn = !!this.fireTimer || auto;
-    this.fireTimer = null;
-    if (!wasOn) return;
+  fireOff() {
+    if (!this.beamOn) return;
+    this.beamOn = false;
     if (this.t && !this.jobActive) {
       try {
         this.send(['M5 S0']);
@@ -261,7 +255,7 @@ export class GrblConnection {
         /* not connected */
       }
     }
-    this.ev.onFire?.(false, 0);
+    this.ev.onFire?.(false);
   }
 
   /**
@@ -334,10 +328,10 @@ export class GrblConnection {
     this.manualQueue = [];
     this.inFlight = [];
     this.cancelSafetyStop();
-    if (this.fireTimer) {
-      clearTimeout(this.fireTimer);
-      this.fireTimer = null;
-      this.ev.onFire?.(false, 0);
+    if (this.beamOn) {
+      // A reset / STOP / disconnect turns the laser off; just report it
+      this.beamOn = false;
+      this.ev.onFire?.(false);
     }
     this.failAll(this.settingsWaiters as Waiter<unknown>[], 'ABORTED');
     this.failAll(this.statusWaiters as Waiter<unknown>[], 'ABORTED');

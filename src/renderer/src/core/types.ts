@@ -111,6 +111,10 @@ export interface MachineProfile {
   travelSpeed: number;
   /** The controller switches an air-assist pump with M8/M9 (coolant); off by default */
   airAssist?: boolean;
+  /** Frame with a visible low-power beam (framePower) instead of the laser off */
+  frameBeam?: boolean;
+  /** Power of the positioning beam ("Fire"), % of S max */
+  firePower?: number;
 }
 
 export type OriginMode = 'absolute' | 'current';

@@ -268,16 +268,16 @@ describe('review round 2', () => {
     }
   });
 
-  it('switches the positioning beam off by itself (main-process watchdog)', async () => {
+  it('keeps the positioning beam on until it is switched off (no auto-off)', async () => {
     vi.useFakeTimers();
     try {
-      conn.fire(10, 10);
+      conn.fire(30);
       mock.step();
-      expect(mock.received).toContain('M3 S10');
-      expect(conn.firing).toBe(true);
-      vi.advanceTimersByTime(9000);
+      expect(mock.received).toContain('M3 S30');
+      vi.advanceTimersByTime(10 * 60 * 1000);
       expect(mock.received).not.toContain('M5 S0');
-      vi.advanceTimersByTime(1100);
+      expect(conn.firing).toBe(true);
+      conn.fireOff();
       expect(mock.received).toContain('M5 S0');
       expect(conn.firing).toBe(false);
     } finally {
@@ -285,8 +285,14 @@ describe('review round 2', () => {
     }
   });
 
+  it('STOP and a controller reset also end the beam', async () => {
+    conn.fire(30);
+    conn.abort();
+    expect(conn.firing).toBe(false);
+  });
+
   it('turns the beam off before a job and on disconnect', async () => {
-    conn.fire(10, 10);
+    conn.fire(10);
     mock.step();
     mock.finishMotion();
     const p = conn.runJob(job(2));
@@ -295,11 +301,11 @@ describe('review round 2', () => {
     await p;
     expect(mock.received.indexOf('M5 S0')).toBeLessThan(mock.received.findIndex((l) => l.startsWith('G1 X')));
     expect(conn.firing).toBe(false);
-    expect(() => conn.fire(10, 10)).toThrow('BUSY'); // never during a job
+    expect(() => conn.fire(10)).toThrow('BUSY'); // never during a job
     mock.drain();
     mock.reportStatus(); // job done
 
-    conn.fire(10, 10);
+    conn.fire(10);
     const before = mock.received.length;
     conn.close();
     expect(mock.received.slice(before)).toContain('M5 S0');

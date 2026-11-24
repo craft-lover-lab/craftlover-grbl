@@ -3,6 +3,7 @@ import type { Anchor, Bounds, Item, JobOptions, Layer, MachineProfile, MaterialP
 import { itemBounds, uid } from '../core/geometry';
 import { activeItems, frameGcode, gcodeBounds, generateJob, insideBed, jobBounds } from '../core/gcode';
 import { checkMachineTravel } from '../core/limits';
+import { jobTiming, progressPlan } from '../core/gcodeTime';
 import { importSvg } from '../io/svg';
 import { importPdf, importRaster } from '../io/image';
 import { textToPaths, type TextAlign } from '../io/text';
@@ -30,9 +31,29 @@ const DEFAULT_MACHINE: MachineProfile = {
   sMax: 1000,
   baud: 115200,
   frameSpeed: 3000,
-  // Frame with the laser off by default; users can raise it for a visible dot
-  framePower: 0,
+  // Frame with a faint, visible beam (toggle next to the Frame button to frame with the laser off)
+  framePower: 1,
+  frameBeam: true,
+  // Positioning beam ("Fire"): bright enough to see on a 10 W diode, far below marking power
+  firePower: 3,
   travelSpeed: 6000,
+};
+
+/** Saved machine profile, upgraded to the current fields. */
+function initialMachine(): MachineProfile {
+  const m = load('machine', DEFAULT_MACHINE);
+  // v0.1 framed with the laser off (0 %) and had no toggle: switch to the visible beam once
+  if (m.frameBeam === undefined) return { ...m, frameBeam: true, framePower: m.framePower > 0 ? m.framePower : 1 };
+  return m;
+}
+
+/** "1:05" / "1:02:03" */
+const clock = (s: number) => {
+  const t = Math.max(0, Math.round(s));
+  const h = Math.floor(t / 3600);
+  const mm = String(Math.floor((t % 3600) / 60)).padStart(h ? 2 : 1, '0');
+  const ss = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 };
 
 const baseLayer = { minPower: 0, passes: 1, lineInterval: 0.1, dither: 'floyd' as const, threshold: 128, overscan: 2.5, bidirectional: true, enabled: true };
@@ -83,7 +104,7 @@ const fmtTime = (s: number) => {
 export function App() {
   const lang = useLang();
   const g = useGrbl();
-  const [machine, setMachine] = useState<MachineProfile>(() => load('machine', DEFAULT_MACHINE));
+  const [machine, setMachine] = useState<MachineProfile>(initialMachine);
   // Objects and layers share one undo/redo history (Ctrl+Z / Ctrl+Y)
   const hist = useHistory<Doc>({ items: [], layers: initialLayers() });
   const { items, layers } = hist.state;
@@ -232,6 +253,30 @@ export function App() {
   const jobOpt: JobOptions = { originMode, anchor, currentPos: g.status.wpos };
   // A job is running, paused or finishing: manual control and new jobs are locked
   const running = g.jobActive;
+
+  // ---------- Progress: time-weighted, with elapsed and remaining time ----------
+  const [plan, setPlan] = useState<{ cum: number[]; total: number } | null>(null);
+  const jobClock = useRef({ start: 0, pausedAt: 0, pausedTotal: 0, end: 0 });
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const st = g.progress?.state;
+    const c = jobClock.current;
+    const now = Date.now();
+    if (st === 'paused' && !c.pausedAt) c.pausedAt = now;
+    if (st !== 'paused' && c.pausedAt) {
+      c.pausedTotal += now - c.pausedAt;
+      c.pausedAt = 0;
+    }
+    if ((st === 'done' || st === 'aborted' || st === 'failed') && c.start && !c.end) c.end = now;
+  }, [g.progress?.state]);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+  const c = jobClock.current;
+  const elapsedS = c.start ? ((c.end || c.pausedAt || Date.now()) - c.start - c.pausedTotal) / 1000 : 0;
+  const timing = plan && g.progress ? jobTiming(plan, g.progress.state === 'done' ? plan.cum.length - 1 : g.progress.acked, elapsedS) : null;
 
   const job = useMemo(() => {
     if (!showPreview || items.length === 0) return null;
@@ -690,8 +735,16 @@ export function App() {
       const j = buildJob();
       const ready = await machineReady('job', j.motion);
       if (!ready.ok) return;
-      const note = ready.unverified ? `\n\n${t('job.unverifiedTravel')}` : '';
+      let note = ready.unverified ? `\n\n${t('job.unverifiedTravel')}` : '';
+      // Layers that want air assist while the machine option is off: the pump will not be switched
+      if (!machine.airAssist) {
+        const used = new Set(activeItems(items, layers).map((i) => i.layerId));
+        const airLayers = layers.filter((l) => l.enabled && l.air && used.has(l.id)).map((l) => l.name);
+        if (airLayers.length) note += `\n\n⚠ ${t('job.airNotEnabled', { layers: airLayers.join(', ') })}`;
+      }
       if (!confirm(t('job.confirmStart', { n: j.lines.length, time: fmtTime(j.seconds) }) + note)) return;
+      setPlan(progressPlan(j.lines, machine.travelSpeed));
+      jobClock.current = { start: Date.now(), pausedAt: 0, pausedTotal: 0, end: 0 };
       await window.laser.run(j.lines);
     } catch (e) {
       alert(errorText(e));
@@ -699,7 +752,7 @@ export function App() {
   }
 
   async function runFrame() {
-    const lines = frameGcode(activeItems(items, layers), machine, jobOpt);
+    const lines = frameGcode(activeItems(items, layers), { ...machine, framePower: machine.frameBeam ? machine.framePower : 0 }, jobOpt);
     if (!lines.length) return alert(t('frame.empty'));
     if (!(await machineReady('frame', gcodeBounds(lines))).ok) return;
     await g.send(lines);
@@ -742,6 +795,13 @@ export function App() {
         </button>
         <button className="warn" onClick={runFrame} disabled={!g.connected || running || !items.length} title={t('tb.frameTip')}>
           ⬚ {t('tb.frame')}
+        </button>
+        <button
+          className={`beam-toggle ${machine.frameBeam ? 'on' : ''}`}
+          onClick={() => setMachine({ ...machine, frameBeam: !machine.frameBeam, framePower: machine.framePower > 0 ? machine.framePower : 1 })}
+          title={machine.frameBeam ? t('tb.frameBeamOn', { power: machine.framePower }) : t('tb.frameBeamOff')}
+        >
+          {machine.frameBeam ? '🔆' : '🌑'}
         </button>
         <button className="go" onClick={startJob} disabled={!g.connected || running || !items.length}>
           ▶ {t('tb.start')}
@@ -788,7 +848,7 @@ export function App() {
         </div>
         <aside className="side">
           <ConnectionPanel g={g} machine={machine} setMachine={setMachine} locked={running} />
-          <JogPanel g={g} jog={jog} disabled={!g.connected || running} sMax={machine.sMax} />
+          <JogPanel g={g} jog={jog} disabled={!g.connected || running} sMax={machine.sMax} firePower={machine.firePower ?? 3} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
           {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} />}
           <LayersPanel
@@ -843,10 +903,15 @@ export function App() {
         <span>X {g.status.wpos.x.toFixed(2)}</span>
         <span>Y {g.status.wpos.y.toFixed(2)}</span>
         {g.progress && g.progress.total > 0 && (
-          <span className={`job-${g.progress.state}`}>
-            {t(`job.state.${g.progress.state}` as Key)} ·{' '}
-            {t('status.progress', { pct: Math.round((100 * g.progress.acked) / g.progress.total), done: g.progress.acked, total: g.progress.total })}
-            {g.progress.errors > 0 && t('status.errors', { n: g.progress.errors })}
+          <span className={`job-progress job-${g.progress.state}`} title={t('prog.tip', { done: g.progress.acked, total: g.progress.total })}>
+            <b>{t(`job.state.${g.progress.state}` as Key)}</b>
+            <span className="bar">
+              <span style={{ width: `${Math.round((timing?.frac ?? g.progress.acked / g.progress.total) * 100)}%` }} />
+            </span>
+            <b>{Math.round((timing?.frac ?? g.progress.acked / g.progress.total) * 100)}%</b>
+            {c.start > 0 && <span>{t('prog.elapsed', { t: clock(elapsedS) })}</span>}
+            {running && timing && <span>{t('prog.remaining', { t: clock(timing.remainingS) })}</span>}
+            {g.progress.errors > 0 && <span>{t('status.errors', { n: g.progress.errors })}</span>}
           </span>
         )}
         {busy && <span>{busy}</span>}

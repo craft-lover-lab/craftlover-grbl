@@ -103,3 +103,17 @@ textarea { background: #16181c; color: var(--text); border: 1px solid var(--line
 @media (max-width: 1600px) { .toolbar .lbl { display: none; } }
 .kerf-calc { grid-column: 1 / -1; border: 1px dashed var(--line); border-radius: 5px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
 .grid2 > .row .num, .grid2 .row input.num { width: 100%; }
+
+/* ---------- Job progress, frame beam toggle, fire warning ---------- */
+.job-progress { display: flex; align-items: center; gap: 8px; }
+.job-progress .bar { width: 220px; height: 8px; border-radius: 4px; background: #343842; overflow: hidden; display: inline-block; }
+.job-progress .bar > span { display: block; height: 100%; background: var(--go); transition: width .4s; }
+.job-paused .bar > span, .job-completing .bar > span { background: var(--warn); }
+.job-aborted .bar > span, .job-failed .bar > span { background: var(--stop); }
+.toolbar .beam-toggle { padding: 4px 6px; margin-left: -4px; }
+.toolbar .beam-toggle.on { border-color: var(--warn); }
+button.firing { background: var(--stop); border-color: var(--stop); color: #fff; animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { 50% { opacity: .6; } }
+.fire-warn { color: #ff8a8a; font-weight: 600; }
+.air-warn { color: #ffb36b; font-size: 11px; line-height: 1.25; }
+.row input[type=checkbox] { flex: none; width: 16px; height: 16px; }
