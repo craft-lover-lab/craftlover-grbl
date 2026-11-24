@@ -19,6 +19,7 @@ import { TestGridDialog } from './TestGridDialog';
 import { migrateLegacyOrder } from '../core/layers';
 import { booleanPaths, type BoolOp } from '../core/boolean';
 import { itemWithPaths, worldPaths } from '../core/nodes';
+import { groupItems, ungroupItem } from '../core/group';
 import { builtinPresets, normalizePresets, presetFromLayer, presetToLayer } from '../core/materials';
 import { buildTestGrid, type TestGridOptions } from '../core/testGrid';
 import { PALETTE, Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
@@ -486,7 +487,50 @@ export function App() {
     align: (m, toBed) => setItems((a) => alignItems(a, selSet, m, toBed ? { minX: 0, minY: 0, maxX: machine.bedW, maxY: machine.bedH } : undefined)),
     distribute: (axis) => setItems((a) => distributeItems(a, selSet, axis)),
     boolean: (op) => booleanSelected(op),
+    group: () => groupSelected(),
+    ungroup: () => ungroupSelected(),
   };
+
+  /**
+   * Ungroup: every selected vector object is split into its separate shapes (an outline keeps
+   * the holes inside it), each its own object on the same layer, at the same place.
+   */
+  function ungroupSelected() {
+    const split = new Map<string, Item[]>();
+    for (const it of selItems) {
+      const parts = ungroupItem(it);
+      if (parts.length) split.set(it.id, parts);
+    }
+    if (!split.size) return g.push(t('group.nothingToUngroup'));
+    const n = [...split.values()].reduce((s, p) => s + p.length, 0);
+    if (n > 3000 && !confirm(t('group.manyParts', { n }))) return;
+    setItems((a) => a.flatMap((i) => split.get(i.id) ?? [i]));
+    setSelectedIds([...selItems.filter((i) => !split.has(i.id)).map((i) => i.id), ...[...split.values()].flat().map((i) => i.id)]);
+    g.push(t('group.ungrouped', { n }));
+  }
+
+  /**
+   * Group the selected vector objects: one group per layer (each layer keeps its own
+   * settings), e.g. window-select one bookmark → its engraving and its outline become two
+   * objects instead of hundreds of small ones.
+   */
+  function groupSelected() {
+    const vec = items.filter((i) => selSet.has(i.id) && i.kind === 'vector');
+    const byLayer = new Map<string, Item[]>();
+    for (const i of vec) byLayer.set(i.layerId, [...(byLayer.get(i.layerId) ?? []), i]);
+    const groups = new Map<string, Item>(); // first member id → group
+    const gone = new Set<string>();
+    for (const list of byLayer.values()) {
+      if (list.length < 2) continue;
+      const grp = groupItems(list, t('group.name', { n: list.length }));
+      if (!grp) continue;
+      groups.set(list[0].id, grp);
+      list.forEach((i) => gone.add(i.id));
+    }
+    if (!groups.size) return;
+    setItems((a) => a.flatMap((i) => (groups.has(i.id) ? [groups.get(i.id)!] : gone.has(i.id) ? [] : [i])));
+    setSelectedIds([...selItems.filter((i) => !gone.has(i.id)).map((i) => i.id), ...[...groups.values()].map((g2) => g2.id)]);
+  }
 
   /**
    * Weld / subtract / intersect the selected vector objects into one new object on the
@@ -691,6 +735,7 @@ export function App() {
           x: () => (copySelected(), deleteSelected()),
           v: paste,
           d: duplicateSelected,
+          g: e.shiftKey ? ungroupSelected : groupSelected,
           a: () => setSelectedIds(items.map((i) => i.id)),
         };
         if (fn[k]) {

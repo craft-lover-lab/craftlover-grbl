@@ -400,4 +400,12 @@ export const vi: Record<Key, string> = {
 
   // STOP not confirmed
   'stop.notConfirmed': 'Bo điều khiển chưa xác nhận đã DỪNG: mọi lệnh vẫn bị khóa. Kiểm tra máy (nguồn, cáp, laser đã tắt) rồi bấm Ngắt kết nối và Kết nối lại.',
+
+  // Group / ungroup
+  'group.groupTip': 'Nhóm (Ctrl+G): gộp các đối tượng đang chọn thành một đối tượng cho mỗi layer',
+  'group.ungroupTip': 'Rã nhóm (Ctrl+Shift+G): tách đối tượng đang chọn thành từng hình riêng để di chuyển hoặc chỉnh sửa',
+  'group.name': 'Nhóm {n} đối tượng',
+  'group.ungrouped': 'Đã rã nhóm thành {n} đối tượng',
+  'group.nothingToUngroup': 'Không có gì để rã nhóm: đối tượng đang chọn chỉ là một hình',
+  'group.manyParts': 'Thao tác này tạo ra {n} đối tượng riêng, có thể làm phần mềm chậm. Tiếp tục?',
 };

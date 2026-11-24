@@ -86,6 +86,8 @@ export interface PropertyActions {
   align: (m: AlignMode, toBed: boolean) => void;
   distribute: (axis: 'x' | 'y') => void;
   boolean: (op: BoolOp) => void;
+  group: () => void;
+  ungroup: () => void;
 }
 
 export function PropertyBar({ sel, b, act }: { sel: Item[]; b: Bounds | null; act: PropertyActions }) {
@@ -137,6 +139,13 @@ export function PropertyBar({ sel, b, act }: { sel: Item[]; b: Bounds | null; ac
       <button disabled={none} title={t(multi ? 'align.bottom' : 'align.bottomBed')} onClick={() => act.align('bottom', !multi)}>{icon('M3 20h18M7 6h4v10H7zM14 10h4v6h-4z')}</button>
       <button disabled={sel.length < 3} title={t('dist.x')} onClick={() => act.distribute('x')}>{icon('M4 4v16M20 4v16M9 8h6v8H9z')}</button>
       <button disabled={sel.length < 3} title={t('dist.y')} onClick={() => act.distribute('y')}>{icon('M4 4h16M4 20h16M8 9h8v6H8z')}</button>
+      <span className="sep" />
+      <button disabled={vec < 2} title={t('group.groupTip')} onClick={act.group}>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 3h4M17 3h4v4M21 17v4h-4M7 21H3v-4M3 7V3" /><rect x="6" y="6" width="7" height="7" /><rect x="11" y="11" width="7" height="7" /></svg>
+      </button>
+      <button disabled={vec < 1} title={t('group.ungroupTip')} onClick={act.ungroup}>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><path d="M13 6h3M18 8v3M6 13v3M8 18h3" strokeDasharray="1.5 1.5" /></svg>
+      </button>
       <span className="sep" />
       <button disabled={vec < 2} title={t('bool.unionTip')} onClick={() => act.boolean('union')}>
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" fillOpacity=".35" stroke="currentColor" strokeWidth="1.6"><path d="M3 4h11v5h7v11H10v-5H3z" /></svg>

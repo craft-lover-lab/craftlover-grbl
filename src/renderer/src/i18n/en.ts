@@ -416,6 +416,14 @@ export const en = {
 
   // STOP not confirmed
   'stop.notConfirmed': 'STOP was not confirmed by the controller: all commands stay locked. Check the machine (power, cable, laser off), then Disconnect and Connect again.',
+
+  // Group / ungroup
+  'group.groupTip': 'Group (Ctrl+G): join the selected objects into one object per layer',
+  'group.ungroupTip': 'Ungroup (Ctrl+Shift+G): split the selected object into its separate shapes so each can be moved or edited',
+  'group.name': 'Group of {n}',
+  'group.ungrouped': 'Ungrouped into {n} objects',
+  'group.nothingToUngroup': 'Nothing to ungroup: the selected object is a single shape',
+  'group.manyParts': 'This makes {n} separate objects, which can slow the editor down. Continue?',
 };
 
 export type Key = keyof typeof en;
