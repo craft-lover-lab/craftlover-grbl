@@ -152,8 +152,18 @@ export function JogPanel({ g, jog, disabled, sMax, firePower }: { g: G; jog: (dx
         <label>{t('jog.airTest')}</label>
         <button disabled={disabled} onClick={() => g.send('M8')}>{t('jog.airOn')}</button>
         <button disabled={disabled} onClick={() => g.send('M9')}>{t('jog.airOff')}</button>
+        {g.connected && <AirBadge air={g.status.air} />}
       </div>
     </section>
+  );
+}
+
+/** Air pump state as the controller reports it (not what the app last asked for). */
+export function AirBadge({ air }: { air?: boolean }) {
+  return (
+    <span className={`air-badge ${air ? 'on' : air === false ? 'off' : ''}`} title={t('air.tip')}>
+      💨 {t(air ? 'air.on' : air === false ? 'air.off' : 'air.unknown')}
+    </span>
   );
 }
 
@@ -216,7 +226,23 @@ export function JobPanel(p: {
 }
 
 // ---------- Properties of the single selected object ----------
-export function ItemPanel({ item, layers, patch, onTrace, onSavePreset }: { item: Item; layers: Layer[]; patch: (p: Partial<Item>) => void; onTrace: (o: TraceOptions) => void; onSavePreset: (it: Item) => void }) {
+export function ItemPanel({
+  item,
+  layers,
+  patch,
+  onTrace,
+  onSavePreset,
+  onEditText,
+  onEditNodes,
+}: {
+  item: Item;
+  layers: Layer[];
+  patch: (p: Partial<Item>) => void;
+  onTrace: (o: TraceOptions) => void;
+  onSavePreset: (it: Item) => void;
+  onEditText: (it: Item) => void;
+  onEditNodes: (it: Item) => void;
+}) {
   const [th, setTh] = useState(128);
   const [smooth, setSmooth] = useState(0.8);
   /** Changing a shape parameter (corner radius, sides) regenerates the paths at the current size */
@@ -243,8 +269,18 @@ export function ItemPanel({ item, layers, patch, onTrace, onSavePreset }: { item
             ))}
         </select>
       </div>
-      <div className="row">
+      <div className="row wrap">
         <button onClick={() => patch({ w: item.srcW, h: item.srcH })}>{t('item.origSize')}</button>
+        {item.text && (
+          <button onClick={() => onEditText(item)} title={t('item.editTextTip')}>
+            ✎ {t('item.editText')}
+          </button>
+        )}
+        {item.kind === 'vector' && (
+          <button onClick={() => onEditNodes(item)} title={t('item.editNodesTip')}>
+            ⬚ {t('item.editNodes')}
+          </button>
+        )}
       </div>
       {item.shape?.type === 'rect' && (
         <div className="row">

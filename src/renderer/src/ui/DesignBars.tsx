@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { Anchor, Bounds, Item, Layer } from '../core/types';
 import type { Tool } from './Workspace';
 import type { AlignMode } from './designOps';
+import type { BoolOp } from '../core/boolean';
 import { refPoint } from './designOps';
 import { t, type Key } from '../i18n';
 
@@ -46,6 +47,7 @@ export function NumField({ value, onCommit, step = 0.1, min, title, disabled }: 
 // ---------- Drawing tool bar (left) ----------
 const TOOLS: { id: Tool; key: string; label: Key; icon: ReactNode }[] = [
   { id: 'select', key: 'V', label: 'tool.select', icon: <path d="M5 3l13 8-6 1.5L9.5 19z" /> },
+  { id: 'node', key: 'N', label: 'tool.node', icon: <path d="M4 18C8 6 16 6 20 18M2.5 16.5h3v3h-3zM18.5 16.5h3v3h-3zM10.5 7.5h3v3h-3z" /> },
   { id: 'line', key: 'L', label: 'tool.line', icon: <path d="M4 20L11 9l4 5 5-10" /> },
   { id: 'rect', key: 'R', label: 'tool.rect', icon: <rect x="4" y="6" width="16" height="12" rx="1" /> },
   { id: 'ellipse', key: 'E', label: 'tool.ellipse', icon: <ellipse cx="12" cy="12" rx="8" ry="7" /> },
@@ -83,6 +85,7 @@ export interface PropertyActions {
   flip: (h: boolean, v: boolean) => void;
   align: (m: AlignMode, toBed: boolean) => void;
   distribute: (axis: 'x' | 'y') => void;
+  boolean: (op: BoolOp) => void;
 }
 
 export function PropertyBar({ sel, b, act }: { sel: Item[]; b: Bounds | null; act: PropertyActions }) {
@@ -94,6 +97,7 @@ export function PropertyBar({ sel, b, act }: { sel: Item[]; b: Bounds | null; ac
   const w = b ? b.maxX - b.minX : 0;
   const h = b ? b.maxY - b.minY : 0;
   const multi = sel.length > 1;
+  const vec = sel.filter((i) => i.kind === 'vector').length;
   const icon = (d: string) => (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
       <path d={d} />
@@ -133,6 +137,16 @@ export function PropertyBar({ sel, b, act }: { sel: Item[]; b: Bounds | null; ac
       <button disabled={none} title={t(multi ? 'align.bottom' : 'align.bottomBed')} onClick={() => act.align('bottom', !multi)}>{icon('M3 20h18M7 6h4v10H7zM14 10h4v6h-4z')}</button>
       <button disabled={sel.length < 3} title={t('dist.x')} onClick={() => act.distribute('x')}>{icon('M4 4v16M20 4v16M9 8h6v8H9z')}</button>
       <button disabled={sel.length < 3} title={t('dist.y')} onClick={() => act.distribute('y')}>{icon('M4 4h16M4 20h16M8 9h8v6H8z')}</button>
+      <span className="sep" />
+      <button disabled={vec < 2} title={t('bool.unionTip')} onClick={() => act.boolean('union')}>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" fillOpacity=".35" stroke="currentColor" strokeWidth="1.6"><path d="M3 4h11v5h7v11H10v-5H3z" /></svg>
+      </button>
+      <button disabled={vec < 2} title={t('bool.subtractTip')} onClick={() => act.boolean('subtract')}>
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="1.6"><path d="M3 4h11v5h-4v6H3z" fill="currentColor" fillOpacity=".35" /><path d="M10 9h11v11H10z" fill="none" strokeDasharray="2 2" /></svg>
+      </button>
+      <button disabled={vec < 2} title={t('bool.intersectTip')} onClick={() => act.boolean('intersect')}>
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="1.6"><path d="M3 4h11v11H3zM10 9h11v11H10z" fill="none" strokeDasharray="2 2" /><path d="M10 9h4v6h-4z" fill="currentColor" fillOpacity=".5" /></svg>
+      </button>
       <span className="muted">{sel.length ? t('prop.count', { n: sel.length }) : t('prop.none')}</span>
     </div>
   );

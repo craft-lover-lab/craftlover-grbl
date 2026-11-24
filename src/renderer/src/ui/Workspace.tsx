@@ -3,9 +3,10 @@ import type { Bounds, Item, Layer, Polyline, Pt } from '../core/types';
 import { copyOffsets, isEmpty, itemBounds, placedPaths, pathsBounds } from '../core/geometry';
 import { regularPolygonBox, shapePaths } from '../core/shapes';
 import { hitItem, itemTouchesRect, moveItems, rotateItems, scaleItems, selBounds } from './designOps';
+import { deleteNode, hitNode, hitSegment, insertNode, itemWithPaths, moveNode, nodeCount, worldPaths, type NodeRef } from '../core/nodes';
 import { t, type Key } from '../i18n';
 
-export type Tool = 'select' | 'line' | 'rect' | 'ellipse' | 'polygon' | 'text';
+export type Tool = 'select' | 'node' | 'line' | 'rect' | 'ellipse' | 'polygon' | 'text';
 
 export type NewItem = Omit<Item, 'id' | 'copies'>;
 
@@ -28,6 +29,8 @@ interface Props {
   onCreate: (it: NewItem) => void;
   onTextAt: (p: Pt) => void;
   onToolDone: () => void;
+  /** Double-click on an object with the select tool (edit text / nodes) */
+  onEditItem: (it: Item) => void;
   laserPos: Pt | null;
   jobFrame: Bounds | null;
   preview: { cut: Polyline[]; travel: Polyline[] } | null;
@@ -54,7 +57,8 @@ type Drag =
   | { kind: 'scale'; base: Item[]; ids: Set<string>; b: Bounds; h: Handle }
   | { kind: 'rotate'; ids: Set<string>; c: Pt; a0: number }
   | { kind: 'marquee'; start: Pt; additive: boolean }
-  | { kind: 'draw'; start: Pt };
+  | { kind: 'draw'; start: Pt }
+  | { kind: 'node'; base: Item; wp: Polyline[]; ref: NodeRef; start: Pt; moved: boolean };
 
 interface Overlay {
   marquee?: { a: Pt; b: Pt };
@@ -86,6 +90,10 @@ export function Workspace(p: Props) {
   const selSet = new Set(p.selectedIds);
   const selItems = p.items.filter((i) => selSet.has(i.id));
   const sb = selItems.length ? selBounds(selItems) : null;
+  // Node editing: the one selected vector object and its selected node
+  const nodeItem = p.tool === 'node' && selItems.length === 1 && selItems[0].kind === 'vector' ? selItems[0] : null;
+  const [node, setNode] = useState<NodeRef | null>(null);
+  useEffect(() => setNode(null), [p.tool, nodeItem?.id]);
 
   useEffect(() => {
     const el = wrap.current!;
@@ -138,6 +146,14 @@ export function Workspace(p: Props) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.code === 'Space' && !space) setSpace(true);
+      if (nodeItem && node && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        const it = nodeItem;
+        const rest = deleteNode(worldPaths(it), node);
+        setNode(null);
+        // Deleting the last node of the last path removes the object
+        p.onCommit((items) => (rest.length ? items.map((i) => (i.id === it.id ? itemWithPaths(i, rest) : i)) : items.filter((i) => i.id !== it.id)));
+      }
       if (p.tool === 'line' && pen.length) {
         if (e.key === 'Enter') finishPen(false);
         else if (e.key === 'Escape') setPen([]);
@@ -273,8 +289,24 @@ export function Workspace(p: Props) {
       ctx.setLineDash([]);
     }
 
+    // Node editing: every vertex of the object, the selected one filled
+    if (nodeItem) {
+      worldPaths(nodeItem).forEach((pl, pi) => {
+        const n = nodeCount(pl);
+        for (let ni = 0; ni < n; ni++) {
+          const [x, y] = toS(pl[ni].x, pl[ni].y);
+          const sel = node && node.pi === pi && node.ni === ni;
+          ctx.fillStyle = sel ? '#1a5fd6' : '#fff';
+          ctx.strokeStyle = '#1a5fd6';
+          ctx.lineWidth = 1;
+          ctx.fillRect(x - 3.5, y - 3.5, 7, 7);
+          ctx.strokeRect(x - 3.5, y - 3.5, 7, 7);
+        }
+      });
+    }
+
     // Selection box + handles
-    if (sb && !overlay.rotate) {
+    if (sb && !overlay.rotate && p.tool !== 'node') {
       const [x0, y0] = toS(sb.minX, sb.maxY);
       const [x1, y1] = toS(sb.maxX, sb.minY);
       ctx.strokeStyle = '#2f7cf6';
@@ -396,7 +428,7 @@ export function Workspace(p: Props) {
       ctx.stroke();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.items, p.layers, p.selectedIds, p.preview, p.jobFrame, p.laserPos, p.bedW, p.bedH, view, size, tick, overlay, pen, cursor && p.tool === 'line' ? cursor : null]);
+  }, [p.items, p.layers, p.selectedIds, p.preview, p.jobFrame, p.laserPos, p.bedW, p.bedH, view, size, tick, overlay, pen, cursor && p.tool === 'line' ? cursor : null, p.tool, node]);
 
   // ---------- Mouse ----------
   const local = (e: React.MouseEvent) => {
@@ -450,6 +482,35 @@ export function Workspace(p: Props) {
       p.onTextAt(drawPt(m, e));
       return;
     }
+    if (p.tool === 'node') {
+      if (nodeItem) {
+        const wp = worldPaths(nodeItem);
+        const tol = 6 / view.scale;
+        const hitN = hitNode(wp, m, tol);
+        if (hitN) {
+          setNode(hitN);
+          drag.current = { kind: 'node', base: nodeItem, wp, ref: hitN, start: m, moved: false };
+          return;
+        }
+        // Double-click on a segment adds a node there
+        const seg = e.detail >= 2 ? hitSegment(wp, m, tol) : null;
+        if (seg) {
+          const r = insertNode(wp, seg.pi, seg.seg, seg.p);
+          const it = nodeItem;
+          p.onCommit((items) => items.map((i) => (i.id === it.id ? itemWithPaths(i, r.paths) : i)));
+          setNode(r.node);
+          return;
+        }
+      }
+      const hit = topHit(m);
+      if (hit && hit.kind === 'vector') {
+        if (hit.id !== nodeItem?.id) p.onSelect([hit.id]);
+      } else if (!hit) {
+        setNode(null);
+        if (!nodeItem) p.onSelect([]);
+      }
+      return;
+    }
     if (p.tool === 'line') {
       const q = drawPt(m, e, pen[pen.length - 1]);
       if (pen.length > 2) {
@@ -487,6 +548,11 @@ export function Workspace(p: Props) {
     }
 
     const hit = topHit(m);
+    if (hit && e.detail >= 2 && !e.shiftKey && !e.ctrlKey) {
+      p.onSelect([hit.id]);
+      p.onEditItem(hit);
+      return;
+    }
     if (hit) {
       if (e.shiftKey || e.ctrlKey) {
         // Shift/Ctrl + click: add to / remove from the selection
@@ -553,6 +619,17 @@ export function Workspace(p: Props) {
       case 'marquee':
         setOverlay({ marquee: { a: d.start, b: m } });
         break;
+      case 'node': {
+        if (!d.moved && Math.hypot(m.x - d.start.x, m.y - d.start.y) * view.scale < 2) return;
+        if (!d.moved) {
+          d.moved = true;
+          p.onBeginEdit();
+        }
+        const to = { x: snap(m.x, !e.altKey), y: snap(m.y, !e.altKey) };
+        const moved = moveNode(d.wp, d.ref, to);
+        p.onLive((items) => items.map((i) => (i.id === d.base.id ? itemWithPaths(d.base, moved) : i)));
+        break;
+      }
       case 'draw': {
         const q = drawPt(m, e);
         const poly = p.tool === 'polygon';
@@ -636,9 +713,10 @@ export function Workspace(p: Props) {
     return [r.left + sx, r.top + sy];
   };
 
-  const cursorStyle = space || drag.current?.kind === 'pan' ? 'grab' : p.tool === 'select' ? 'default' : p.tool === 'text' ? 'text' : 'crosshair';
+  const cursorStyle = space || drag.current?.kind === 'pan' ? 'grab' : p.tool === 'select' || p.tool === 'node' ? 'default' : p.tool === 'text' ? 'text' : 'crosshair';
   const hintKey: Record<Tool, Key> = {
     select: 'hint.select',
+    node: 'hint.node',
     line: 'hint.line',
     rect: 'hint.rect',
     ellipse: 'hint.ellipse',

@@ -65,11 +65,23 @@ export interface ShapeSpec {
   sides?: number;
 }
 
+/** How a text object was made, kept so it can be edited again (text, font, size). */
+export interface TextSource {
+  text: string;
+  /** Font file path */
+  font: string;
+  /** Font size (mm) */
+  size: number;
+  align: 'left' | 'center' | 'right';
+}
+
 export interface Item {
   id: string;
   name: string;
   kind: 'vector' | 'bitmap';
   shape?: ShapeSpec;
+  /** Present on text objects that can still be re-edited (dropped once rotated/mirrored/edited as paths) */
+  text?: TextSource;
   /** Vector paths in source coordinates (mm), scaled to w×h when placed */
   paths?: Polyline[];
   bitmap?: Bitmap;

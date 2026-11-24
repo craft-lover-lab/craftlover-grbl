@@ -17,10 +17,12 @@ import { useHistory } from './useHistory';
 import { MaterialLibrary } from './MaterialLibrary';
 import { TestGridDialog } from './TestGridDialog';
 import { migrateLegacyOrder } from '../core/layers';
+import { booleanPaths, type BoolOp } from '../core/boolean';
+import { itemWithPaths, worldPaths } from '../core/nodes';
 import { builtinPresets, normalizePresets, presetFromLayer, presetToLayer } from '../core/materials';
 import { buildTestGrid, type TestGridOptions } from '../core/testGrid';
 import { PALETTE, Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
-import { ConnectionPanel, ItemPanel, JobPanel, JogPanel, LayersPanel } from './Panels';
+import { AirBadge, ConnectionPanel, ItemPanel, JobPanel, JogPanel, LayersPanel } from './Panels';
 import { alignItems, cloneItems, distributeItems, flipItems, moveItems, rotateItems, scaleItems, selBounds } from './designOps';
 
 const DEFAULT_MACHINE: MachineProfile = {
@@ -127,6 +129,8 @@ export function App() {
   const [sides, setSides] = useState(6);
   const [activeLayerId, setActiveLayerId] = useState('cut');
   const [textAt, setTextAt] = useState<Pt | null>(null);
+  /** Text object being edited in the text dialog */
+  const [textEdit, setTextEdit] = useState<Item | null>(null);
   const clipboard = useRef<Item[]>([]);
   const [originMode, setOriginMode] = useState<OriginMode>('absolute');
   const [anchor, setAnchor] = useState<Anchor>('bl');
@@ -470,7 +474,41 @@ export function App() {
     flip: (h, v) => applyTransform(0, h, v),
     align: (m, toBed) => setItems((a) => alignItems(a, selSet, m, toBed ? { minX: 0, minY: 0, maxX: machine.bedW, maxY: machine.bedH } : undefined)),
     distribute: (axis) => setItems((a) => distributeItems(a, selSet, axis)),
+    boolean: (op) => booleanSelected(op),
   };
+
+  /**
+   * Weld / subtract / intersect the selected vector objects into one new object on the
+   * first object's layer. "First" is the first one clicked (or the oldest when box-selected);
+   * subtract removes all the others from it.
+   */
+  function booleanSelected(op: BoolOp) {
+    const vec = selectedIds.map((id) => items.find((i) => i.id === id)).filter((i): i is Item => !!i && i.kind === 'vector');
+    if (vec.length < 2) return;
+    const r = booleanPaths(op, vec.map(worldPaths));
+    if (r.openIgnored) g.push(t('bool.openIgnored', { n: r.openIgnored }));
+    if (!r.paths.length) return alert(t('bool.empty'));
+    const base = vec[0];
+    const res = itemWithPaths({ ...base, id: uid(), name: t(`bool.name.${op}` as Key, { name: base.name }), override: undefined }, r.paths);
+    const gone = new Set(vec.map((i) => i.id));
+    setItems((a) => {
+      // The result takes the place of the first object in the drawing order
+      const at = a.findIndex((i) => i.id === base.id);
+      const out = a.filter((i) => !gone.has(i.id));
+      out.splice(Math.min(at, out.length), 0, res);
+      return out;
+    });
+    setSelectedIds([res.id]);
+  }
+
+  /** Double-click / "Edit": text opens the text dialog, other vectors switch to node editing. */
+  function editItem(it: Item) {
+    if (it.text) setTextEdit(it);
+    else if (it.kind === 'vector') {
+      setSelectedIds([it.id]);
+      setTool('node');
+    }
+  }
 
   function deleteSelected() {
     if (!selItems.length) return;
@@ -512,7 +550,28 @@ export function App() {
   async function addText(spec: { text: string; font: string; size: number; align: TextAlign; layerId: string }, at?: Pt) {
     const r = await textToPaths(spec.text, spec.font, spec.size, spec.align);
     const name = t('text.itemName', { text: spec.text.split('\n')[0].slice(0, 20) });
-    addItem({ name, kind: 'vector', paths: r.paths, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: spec.layerId }, at);
+    const text = { text: spec.text, font: spec.font, size: spec.size, align: spec.align };
+    addItem({ name, kind: 'vector', text, paths: r.paths, srcW: r.w, srcH: r.h, w: r.w, h: r.h, layerId: spec.layerId }, at);
+  }
+
+  /**
+   * Regenerate a text object from new settings. Any stretching the user applied is kept
+   * (same scale factors), and the object stays anchored by its alignment: left text keeps
+   * its left edge, right text its right edge, centered text its center.
+   */
+  async function updateText(it: Item, spec: { text: string; font: string; size: number; align: TextAlign; layerId: string }) {
+    const r = await textToPaths(spec.text, spec.font, spec.size, spec.align);
+    const sx = it.srcW > 0 ? it.w / it.srcW : 1;
+    const sy = it.srcH > 0 ? it.h / it.srcH : 1;
+    const w = r.w * sx;
+    const h = r.h * sy;
+    const x = spec.align === 'left' ? it.x : spec.align === 'right' ? it.x + it.w - w : it.x + (it.w - w) / 2;
+    const y = it.y + (it.h - h) / 2;
+    const nameOf = (s: string) => t('text.itemName', { text: s.split('\n')[0].slice(0, 20) });
+    // Names the user typed are kept; generated ones follow the new text
+    const autoName = !it.text || it.name === nameOf(it.text.text);
+    const text = { text: spec.text, font: spec.font, size: spec.size, align: spec.align };
+    patchItem(it.id, { text, paths: r.paths, srcW: r.w, srcH: r.h, w, h, x, y, layerId: spec.layerId, ...(autoName ? { name: nameOf(spec.text) } : {}) });
   }
 
   // ---------- Project files ----------
@@ -628,7 +687,7 @@ export function App() {
         }
         return;
       }
-      const tools: Record<string, Tool> = { v: 'select', l: 'line', r: 'rect', e: 'ellipse', p: 'polygon', t: 'text' };
+      const tools: Record<string, Tool> = { v: 'select', n: 'node', l: 'line', r: 'rect', e: 'ellipse', p: 'polygon', t: 'text' };
       if (tools[k] && !e.altKey) return setTool(tools[k]);
       if (e.key === 'Escape') {
         setTool('select');
@@ -638,7 +697,8 @@ export function App() {
       if (!selItems.length) return;
       const step = e.shiftKey ? 10 : 1;
       const mv: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
-      if (e.key === 'Delete') deleteSelected();
+      // In node editing, Delete removes the selected node (handled by the workspace)
+      if (e.key === 'Delete' && tool !== 'node') deleteSelected();
       else if (mv[e.key]) {
         e.preventDefault();
         setItems((a) => moveItems(a, selSet, mv[e.key][0], mv[e.key][1]));
@@ -692,6 +752,12 @@ export function App() {
       const p = parseProject(serializeProject(items, layers));
       hist.reset({ items: p.items, layers: p.layers });
       return p.items.length;
+    }
+    if (name === 'boolean') booleanSelected(args[0]);
+    if (name === 'selectIds') setSelectedIds(args[0].map((k: number) => items[k].id));
+    if (name === 'editText') {
+      const it = items[args[0]];
+      await updateText(it, { ...it.text!, layerId: it.layerId, ...args[1] });
     }
     if (name === 'fonts') return (await window.laser.listFonts()).slice(0, 3);
     return items
@@ -876,6 +942,7 @@ export function App() {
             onCreate={createDrawn}
             onTextAt={(pt) => setTextAt(pt)}
             onToolDone={() => setTool('select')}
+            onEditItem={editItem}
             laserPos={g.connected ? g.status.wpos : null}
             jobFrame={originMode === 'current' && activeItems(items, layers).length ? jobBounds(activeItems(items, layers), jobOpt) : null}
             preview={job?.preview ?? null}
@@ -886,7 +953,7 @@ export function App() {
           <ConnectionPanel g={g} machine={machine} setMachine={setMachine} locked={running} />
           <JogPanel g={g} jog={jog} disabled={!g.connected || running} sMax={machine.sMax} firePower={machine.firePower ?? 3} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
-          {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} />}
+          {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} onEditText={editItem} onEditNodes={(it) => (setSelectedIds([it.id]), setTool('node'))} />}
           <LayersPanel
             layers={layers}
             counts={layerCounts}
@@ -919,6 +986,22 @@ export function App() {
         />
       )}
 
+      {textEdit?.text && (
+        <TextDialog
+          layers={layers}
+          initial={{ ...textEdit.text, layerId: textEdit.layerId }}
+          onClose={() => setTextEdit(null)}
+          onOk={async (spec) => {
+            try {
+              await updateText(textEdit, spec);
+              setTextEdit(null);
+            } catch (e) {
+              alert(errorText(e));
+            }
+          }}
+        />
+      )}
+
       {libDlg && (
         <MaterialLibrary
           presets={presets}
@@ -938,6 +1021,7 @@ export function App() {
         <span className={`dot ${g.connected ? 'on' : ''}`} /> {g.connected ? g.status.state : t('status.disconnected')}
         <span>X {g.status.wpos.x.toFixed(2)}</span>
         <span>Y {g.status.wpos.y.toFixed(2)}</span>
+        {g.connected && <AirBadge air={g.status.air} />}
         {g.progress && g.progress.total > 0 && (
           <span className={`job-progress job-${g.progress.state}`} title={t('prog.tip', { done: g.progress.acked, total: g.progress.total })}>
             <b>{t(`job.state.${g.progress.state}` as Key)}</b>

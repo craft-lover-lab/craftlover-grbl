@@ -378,6 +378,31 @@ export const en = {
   'alarm.3': 'Reset while moving — position may be lost',
   'alarm.8': 'Homing failed: could not pull off the switch',
   'alarm.9': 'Homing failed: switch not found',
+
+  // Air assist indicator
+  'air.on': 'Air ON',
+  'air.off': 'Air off',
+  'air.unknown': 'Air ?',
+  'air.tip': 'Air pump state reported by the controller (M8 = on, M9 = off)',
+
+  // Text re-editing, node editing, boolean operations
+  'common.apply': 'Apply',
+  'textdlg.editTitle': 'Edit text',
+  'textdlg.missingFont': '{file} (not installed)',
+  'item.editText': 'Edit text',
+  'item.editTextTip': 'Change the text, font or size (or double-click the text on the canvas)',
+  'item.editNodes': 'Edit nodes',
+  'item.editNodesTip': 'Move, add or delete the points of this object (N, or double-click it on the canvas)',
+  'tool.node': 'Edit nodes',
+  'hint.node': 'Click an object to show its nodes · Drag a node to move it (Alt: no snapping) · Delete: remove the selected node · Double-click a line: add a node · Esc: done',
+  'bool.unionTip': 'Weld (union): merge the selected shapes into one outline',
+  'bool.subtractTip': 'Subtract: cut the other selected shapes out of the first one you selected (the oldest when box-selected)',
+  'bool.intersectTip': 'Intersect: keep only the area all selected shapes share',
+  'bool.name.union': '{name} (welded)',
+  'bool.name.subtract': '{name} (subtracted)',
+  'bool.name.intersect': '{name} (intersection)',
+  'bool.empty': 'The result is empty — the shapes do not overlap.',
+  'bool.openIgnored': '{n} object(s) contain open lines; only closed shapes take part in weld/subtract/intersect',
 };
 
 export type Key = keyof typeof en;

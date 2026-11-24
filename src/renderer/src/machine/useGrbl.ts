@@ -30,6 +30,8 @@ export interface GrblStatus {
   wpos: Pt;
   feed: number;
   spindle: number;
+  /** Air pump (coolant M8/M7) as reported in the "A:" accessory field; undefined until known */
+  air?: boolean;
 }
 
 declare global {
@@ -88,7 +90,7 @@ export function useGrbl() {
     if (!window.laser) return;
     const off1 = window.laser.onLine((line) => {
       if (line.startsWith('<')) {
-        setStatus(parseStatus(line, wco.current));
+        setStatus((prev) => parseStatus(line, wco.current, prev.air));
         return;
       }
       if (/^Grbl|^GrblHAL/i.test(line)) setVersion(line);
@@ -113,6 +115,7 @@ export function useGrbl() {
     });
     const off3 = window.laser.onClosed(() => {
       setConnected(false);
+      setStatus((st) => ({ ...st, air: undefined }));
       push(t('log.disconnected'));
     });
     return () => {
@@ -153,11 +156,20 @@ export function useGrbl() {
   return { connected, status, log, progress, jobActive: isJobActive(progress), version, connect, disconnect, send, push, wco };
 }
 
-function parseStatus(line: string, wco: Pt): GrblStatus {
+/**
+ * Parse a GRBL 1.1 status report. `prevAir` carries the air state between reports: GRBL only
+ * sends the accessory field "A:" together with "Ov:" (every few reports, and right after an
+ * accessory changes), and leaves "A:" out entirely when nothing is on.
+ */
+export function parseStatus(line: string, wco: Pt, prevAir?: boolean): GrblStatus {
   const body = line.replace(/^<|>$/g, '').split('|');
-  const st: GrblStatus = { state: body[0], mpos: { x: 0, y: 0 }, wpos: { x: 0, y: 0 }, feed: 0, spindle: 0 };
+  const st: GrblStatus = { state: body[0], mpos: { x: 0, y: 0 }, wpos: { x: 0, y: 0 }, feed: 0, spindle: 0, air: prevAir };
   let hasM = false;
   let hasW = false;
+  const fields = body.slice(1).map((f) => f.split(':')[0]);
+  const acc = body.find((f) => f.startsWith('A:'));
+  if (acc) st.air = /[FM]/.test(acc.slice(2));
+  else if (fields.includes('Ov')) st.air = false;
   for (const f of body.slice(1)) {
     const [k, v] = f.split(':');
     const n = (v ?? '').split(',').map(Number);

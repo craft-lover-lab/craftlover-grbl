@@ -37,7 +37,8 @@ export function rotateItems(items: Item[], ids: Set<string>, angle: number, c: P
       x: c.x + (ic.x - c.x) * Math.cos(t) - (ic.y - c.y) * Math.sin(t),
       y: c.y + (ic.x - c.x) * Math.sin(t) + (ic.y - c.y) * Math.cos(t),
     };
-    return { ...r, shape: angle % 360 === 0 ? i.shape : undefined, x: nc.x - r.w / 2, y: nc.y - r.h / 2 };
+    const keep = angle % 360 === 0;
+    return { ...r, shape: keep ? i.shape : undefined, text: keep ? i.text : undefined, x: nc.x - r.w / 2, y: nc.y - r.h / 2 };
   });
 }
 
@@ -47,7 +48,8 @@ export function flipItems(items: Item[], ids: Set<string>, fx: boolean, fy: bool
   return items.map((i) => {
     if (!ids.has(i.id)) return i;
     const r = transformItem(i, 0, fx, fy);
-    return { ...r, x: fx ? b.minX + b.maxX - i.x - i.w : i.x, y: fy ? b.minY + b.maxY - i.y - i.h : i.y };
+    // Mirrored text can no longer be regenerated from its source
+    return { ...r, text: undefined, x: fx ? b.minX + b.maxX - i.x - i.w : i.x, y: fy ? b.minY + b.maxY - i.y - i.h : i.y };
   });
 }
 

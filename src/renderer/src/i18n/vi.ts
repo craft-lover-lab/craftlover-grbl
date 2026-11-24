@@ -362,4 +362,29 @@ export const vi: Record<Key, string> = {
   'alarm.3': 'Bị reset khi đang chạy — vị trí có thể đã mất',
   'alarm.8': 'Homing thất bại: không rời được công tắc',
   'alarm.9': 'Homing thất bại: không tìm thấy công tắc',
+
+  // Air assist indicator
+  'air.on': 'Thổi khí BẬT',
+  'air.off': 'Thổi khí tắt',
+  'air.unknown': 'Thổi khí ?',
+  'air.tip': 'Trạng thái bơm khí do bo điều khiển báo về (M8 = bật, M9 = tắt)',
+
+  // Text re-editing, node editing, boolean operations
+  'common.apply': 'Áp dụng',
+  'textdlg.editTitle': 'Sửa chữ',
+  'textdlg.missingFont': '{file} (chưa cài)',
+  'item.editText': 'Sửa chữ',
+  'item.editTextTip': 'Đổi nội dung, font hoặc cỡ chữ (hoặc bấm đúp vào chữ trên khung vẽ)',
+  'item.editNodes': 'Sửa nút',
+  'item.editNodesTip': 'Di chuyển, thêm hoặc xóa các điểm của hình này (phím N, hoặc bấm đúp vào hình)',
+  'tool.node': 'Sửa nút',
+  'hint.node': 'Bấm vào hình để hiện các nút · Kéo nút để di chuyển (giữ Alt: không bắt lưới) · Delete: xóa nút đang chọn · Bấm đúp lên đường: thêm nút · Esc: xong',
+  'bool.unionTip': 'Gộp (hàn): nối các hình đang chọn thành một đường bao',
+  'bool.subtractTip': 'Trừ: khoét các hình khác ra khỏi hình được chọn đầu tiên (hình cũ nhất nếu chọn bằng kéo khung)',
+  'bool.intersectTip': 'Giao: chỉ giữ phần mà tất cả các hình cùng chồng lên',
+  'bool.name.union': '{name} (đã gộp)',
+  'bool.name.subtract': '{name} (đã trừ)',
+  'bool.name.intersect': '{name} (phần giao)',
+  'bool.empty': 'Kết quả rỗng — các hình không chồng lên nhau.',
+  'bool.openIgnored': '{n} đối tượng có đường hở; chỉ hình kín mới tham gia gộp/trừ/giao',
 };
