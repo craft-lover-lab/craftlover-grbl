@@ -84,7 +84,22 @@ export function ConnectionPanel({ g, machine, setMachine, locked }: { g: G; mach
 // ---------- Jogging, origin, homing ----------
 /** Warn when the positioning beam has been on this long (s) */
 const FIRE_WARN_S = 30;
-export function JogPanel({ g, jog, disabled, sMax, firePower }: { g: G; jog: (dx: number, dy: number, step: number, feed: number) => void; disabled: boolean; sMax: number; firePower: number }) {
+export function JogPanel({
+  g,
+  jog,
+  disabled,
+  sMax,
+  firePower,
+  fireMaxS,
+}: {
+  g: G;
+  jog: (dx: number, dy: number, step: number, feed: number) => void;
+  disabled: boolean;
+  sMax: number;
+  firePower: number;
+  /** Fire switches itself off after this many seconds (0 = never) */
+  fireMaxS: number;
+}) {
   const [step, setStep] = useState(10);
   const [feed, setFeed] = useState(3000);
   // Fire: a low-power beam to see where the laser points. It stays on until clicked again
@@ -103,7 +118,7 @@ export function JogPanel({ g, jog, disabled, sMax, firePower }: { g: G; jog: (dx
   const fire = async () => {
     if (firing) return window.laser.fire(false);
     setNow(Date.now());
-    await window.laser.fire(true, Math.round((sMax * firePower) / 100)).catch((e: Error) => g.push(`⚠ ${e.message}`));
+    await window.laser.fire(true, Math.round((sMax * firePower) / 100), fireMaxS).catch((e: Error) => g.push(`⚠ ${errorText(e)}`));
   };
 
 
@@ -147,7 +162,12 @@ export function JogPanel({ g, jog, disabled, sMax, firePower }: { g: G; jog: (dx
           {firing ? `🔴 ${t('jog.fireOff')} · ${fireSecs}s` : `🔆 ${t('jog.fire', { power: firePower })}`}
         </button>
       </div>
-      {firing && fireSecs >= FIRE_WARN_S && <div className="fire-warn">{t('jog.fireLong', { s: fireSecs })}</div>}
+      {firing && fireSecs >= FIRE_WARN_S && (
+        <div className="fire-warn">
+          {t('jog.fireLong', { s: fireSecs })}
+          {fireMaxS > 0 && ` ${t('jog.fireAutoOff', { s: Math.max(0, fireMaxS - fireSecs) })}`}
+        </div>
+      )}
       <div className="row wrap" title={t('jog.airTip')}>
         <label>{t('jog.airTest')}</label>
         <button disabled={disabled} onClick={() => g.send('M8')}>{t('jog.airOn')}</button>
@@ -216,8 +236,10 @@ export function JobPanel(p: {
         <input type="number" value={m.sMax} onChange={(e) => p.setMachine({ ...m, sMax: +e.target.value })} />
         <label>{t('jobp.firePower')}</label>
         <input type="number" step={1} min={1} max={10} value={m.firePower ?? 3} onChange={(e) => p.setMachine({ ...m, firePower: Math.min(10, Math.max(1, +e.target.value || 1)) })} />
+        <label title={t('jobp.fireMaxTip')}>{t('jobp.fireMax')}</label>
+        <input type="number" step={30} min={0} max={3600} value={m.fireMaxS ?? 300} title={t('jobp.fireMaxTip')} onChange={(e) => p.setMachine({ ...m, fireMaxS: Math.min(3600, Math.max(0, Math.round(+e.target.value) || 0)) })} />
         <label title={t('jobp.returnAfterStopTip')}>{t('jobp.returnAfterStop')}</label>
-        <input type="checkbox" checked={m.returnAfterStop !== false} title={t('jobp.returnAfterStopTip')} onChange={(e) => p.setMachine({ ...m, returnAfterStop: e.target.checked })} />
+        <input type="checkbox" checked={!!m.returnAfterStop} title={t('jobp.returnAfterStopTip')} onChange={(e) => p.setMachine({ ...m, returnAfterStop: e.target.checked })} />
         <label title={t('jobp.airAssistTip')}>{t('jobp.airAssist')}</label>
         <input type="checkbox" checked={!!m.airAssist} title={t('jobp.airAssistTip')} onChange={(e) => p.setMachine({ ...m, airAssist: e.target.checked })} />
       </div>

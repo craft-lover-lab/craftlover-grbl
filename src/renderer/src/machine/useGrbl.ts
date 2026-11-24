@@ -47,8 +47,9 @@ declare global {
       resume(): Promise<void>;
       abort(): Promise<void>;
       checkMachine(): Promise<{ state: string; settings: Record<string, string>; jobActive: boolean; homed: boolean }>;
-      fire(on: boolean, s?: number): Promise<void>;
+      fire(on: boolean, s?: number, maxS?: number): Promise<void>;
       onFire(cb: (v: { on: boolean }) => void): () => void;
+      onStopping(cb: (v: { on: boolean }) => void): () => void;
       openFiles(): Promise<{ name: string; data: Uint8Array }[]>;
       saveText(name: string, text: string, kind?: 'gcode' | 'project'): Promise<boolean>;
       openProject(): Promise<{ name: string; text: string } | null>;
@@ -82,6 +83,8 @@ export function useGrbl() {
   const [log, setLog] = useState<string[]>([]);
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [version, setVersion] = useState('');
+  /** A STOP is in progress (hold → reset → first status): commands are refused meanwhile */
+  const [stopping, setStopping] = useState(false);
   const wco = useRef<Pt>({ x: 0, y: 0 });
 
   const push = useCallback((l: string) => setLog((old) => [...old.slice(-400), l]), []);
@@ -113,6 +116,7 @@ export function useGrbl() {
         if (p.reason !== 'stopped') setTimeout(() => alert(msg), 0);
       }
     });
+    const off4 = window.laser.onStopping(({ on }) => setStopping(on));
     const off3 = window.laser.onClosed(() => {
       setConnected(false);
       setStatus((st) => ({ ...st, air: undefined }));
@@ -122,6 +126,7 @@ export function useGrbl() {
       off1();
       off2();
       off3();
+      off4();
     };
   }, [push]);
 
@@ -147,13 +152,13 @@ export function useGrbl() {
       arr.forEach((l) => push(`> ${l}`));
       return window.laser.send(arr).catch((e: Error) => {
         // Manual commands are refused while a job runs, so they can never mix into it
-        push(e.message.includes('BUSY') ? `⚠ ${t('job.busy')}` : `⚠ ${e.message}`);
+        push(e.message.includes('BUSY') ? `⚠ ${t('job.busy')}` : e.message.includes('STOPPING') ? `⚠ ${t('err.stopping')}` : `⚠ ${e.message}`);
       });
     },
     [push],
   );
 
-  return { connected, status, log, progress, jobActive: isJobActive(progress), version, connect, disconnect, send, push, wco };
+  return { connected, status, log, progress, jobActive: isJobActive(progress), stopping, version, connect, disconnect, send, push, wco };
 }
 
 /**

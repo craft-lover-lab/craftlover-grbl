@@ -23,12 +23,29 @@ export function cssColorToHex(value: string | null | undefined): string | null {
   return named[v] ?? '#000000';
 }
 
-/** How an SVG element is painted, which decides the layer mode for its color. */
-export function paintOf(style: { stroke: string; fill: string; strokeWidth: string; strokeOpacity: string; fillOpacity: string; opacity: string }): { color: string; mode: 'line' | 'fill' } | null {
-  if (parseFloat(style.opacity || '1') <= 0) return null;
+export interface Paint {
+  color: string;
+  mode: 'line' | 'fill';
+}
+
+/**
+ * How an SVG element is painted, which decides the layer(s) it goes to:
+ * - stroke only → line (cut/score) in the stroke color
+ * - fill only → fill engrave in the fill color
+ * - stroke and fill in different colors → both: the outline is cut/scored AND the inside is
+ *   engraved (e.g. a red outline around a blue area, common in Illustrator/Inkscape/Corel files)
+ * - stroke and fill in the same color → line only (one operation per color, as before)
+ * `canFill` is false for elements without an area (a <line>).
+ */
+export function paintsOf(
+  style: { stroke: string; fill: string; strokeWidth: string; strokeOpacity: string; fillOpacity: string; opacity: string },
+  canFill = true,
+): Paint[] {
+  if (parseFloat(style.opacity || '1') <= 0) return [];
   const stroke = parseFloat(style.strokeWidth || '1') > 0 && parseFloat(style.strokeOpacity || '1') > 0 ? cssColorToHex(style.stroke) : null;
-  if (stroke) return { color: stroke, mode: 'line' };
-  const fill = parseFloat(style.fillOpacity || '1') > 0 ? cssColorToHex(style.fill) : null;
-  if (fill) return { color: fill, mode: 'fill' };
-  return null;
+  const fill = canFill && parseFloat(style.fillOpacity || '1') > 0 ? cssColorToHex(style.fill) : null;
+  const out: Paint[] = [];
+  if (stroke) out.push({ color: stroke, mode: 'line' });
+  if (fill && fill !== stroke) out.push({ color: fill, mode: 'fill' });
+  return out;
 }

@@ -184,7 +184,60 @@ describe('errors and interruptions', () => {
     expect(mock.state).toBe('Idle'); // not locked by ALARM:3
     expect(log.some((l) => l.startsWith('ALARM'))).toBe(false);
     expect(mock.rx).toHaveLength(0);
+    // Locked until the restarted controller reports its state again
+    expect(() => conn.send(['G90 G0 X0 Y0'])).toThrow('STOPPING');
+    mock.reportStatus();
     expect(() => conn.send(['G90 G0 X0 Y0'])).not.toThrow(); // can return to the origin
+  });
+
+  it('refuses every new command between STOP and the end of the reset (regression)', async () => {
+    const stopping: boolean[] = [];
+    const c = new GrblConnection(
+      { onLine: () => {}, onProgress: () => {}, onClose: () => {}, onStopping: (on) => stopping.push(on) },
+      { open: mock.factory, pollMs: 0 },
+    );
+    await c.open('MOCK', 115200);
+    mock.reportStatus();
+    await c.runJob(job(100));
+    mock.step(5);
+    c.abort();
+    expect(c.isStopping).toBe(true);
+    expect(stopping).toEqual([true]);
+    // During the hold: jog, Fire and a new job are all refused, nothing reaches the controller
+    const before = mock.received.length;
+    expect(() => c.send(['$J=G91 X10 F1000'])).toThrow('STOPPING');
+    expect(() => c.fire(30)).toThrow('STOPPING');
+    await expect(c.runJob(job(2))).rejects.toThrow('STOPPING');
+    expect(mock.received.length).toBe(before);
+    mock.holdComplete();
+    mock.reportStatus(); // Hold:0 → reset → banner
+    expect(mock.resets).toBe(1);
+    // Right after the restart: still refused until a status report confirms the state
+    expect(() => c.send(['G0 X0'])).toThrow('STOPPING');
+    mock.reportStatus();
+    expect(c.isStopping).toBe(false);
+    expect(stopping).toEqual([true, false]);
+    expect(() => c.send(['G0 X0'])).not.toThrow();
+    c.close();
+  });
+
+  it('unlocks after a timeout when the controller never confirms the reset', async () => {
+    vi.useFakeTimers();
+    try {
+      const c = new GrblConnection({ onLine: (l) => log.push(l), onProgress: () => {}, onClose: () => {} }, { open: mock.factory, pollMs: 0, stoppingTimeoutMs: 2000 });
+      await c.open('MOCK', 115200);
+      mock.state = 'Run';
+      mock.planner = 1;
+      c.abort(); // Hold:1, and the hold never completes; reset at 1.5 s
+      mock.silent = true; // controller goes silent: no banner, no status
+      vi.advanceTimersByTime(1600);
+      expect(c.isStopping).toBe(true);
+      vi.advanceTimersByTime(500);
+      expect(c.isStopping).toBe(false);
+      expect(log.some((l) => l.includes('did not confirm'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('STOP resets at once when the machine is already idle', async () => {
@@ -311,7 +364,31 @@ describe('review round 2', () => {
     }
   });
 
-  it('STOP and a controller reset also end the beam', async () => {
+  it('Fire switches itself off after its maximum on-time', async () => {
+    vi.useFakeTimers();
+    try {
+      conn.fire(30, 300_000);
+      mock.step();
+      vi.advanceTimersByTime(299_000);
+      expect(conn.firing).toBe(true);
+      vi.advanceTimersByTime(1_000);
+      expect(conn.firing).toBe(false);
+      expect(mock.received).toContain('M5 S0');
+      expect(log.some((l) => l.includes('maximum on-time'))).toBe(true);
+      // Switching it off by hand cancels the timer: a later Fire gets its own full time
+      conn.fire(30, 300_000);
+      mock.step();
+      conn.fireOff();
+      conn.fire(30, 300_000);
+      mock.step();
+      vi.advanceTimersByTime(200_000);
+      expect(conn.firing).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+    it('STOP and a controller reset also end the beam', async () => {
     conn.fire(30);
     mock.step();
     conn.abort();

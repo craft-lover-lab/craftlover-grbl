@@ -40,7 +40,11 @@ const DEFAULT_MACHINE: MachineProfile = {
   firePower: 3,
   // Air assist via M8/M9 (standard GRBL 1.1 accepts it even when no pump is wired)
   airAssist: true,
-  returnAfterStop: true,
+  // After STOP the machine stays where it is; a "Return to start" button is offered instead.
+  // Moving on its own after an emergency-style stop would be unsafe (shifted part, fire, jam).
+  returnAfterStop: false,
+  // Fire switches itself off after 5 minutes
+  fireMaxS: 300,
   travelSpeed: 6000,
 };
 
@@ -51,6 +55,12 @@ function initialMachine(): MachineProfile {
   if (m.frameBeam === undefined) m = { ...m, frameBeam: true, framePower: m.framePower > 0 ? m.framePower : 1 };
   // Air assist used to be an opt-in machine option; it is on by default now
   if (m.airAssist === undefined) m = { ...m, airAssist: true };
+  // Automatic return after STOP used to be on by default: switch it off once (it stays available)
+  if (localStorage.getItem('stopPolicy') !== '2') {
+    m = { ...m, returnAfterStop: false };
+    localStorage.setItem('stopPolicy', '2');
+  }
+  if (m.fireMaxS === undefined) m = { ...m, fireMaxS: 300 };
   return m;
 }
 
@@ -267,15 +277,33 @@ export function App() {
   // ---------- After STOP: go back to where the job started ----------
   const jobStart = useRef<Pt>({ x: 0, y: 0 });
   const pendingReturn = useRef<{ pos: Pt; until: number } | null>(null);
+  /** After STOP: where the "Return to start" button would take the head */
+  const [returnOffer, setReturnOffer] = useState<Pt | null>(null);
   useEffect(() => {
     const p = g.progress;
-    if (p?.state === 'aborted' && p.reason === 'stopped' && machine.returnAfterStop) {
-      // Armed shortly after STOP so the Idle that counts is the one after the hold + reset
+    if (p?.state === 'aborted' && p.reason === 'stopped') {
       const pos = jobStart.current;
-      setTimeout(() => (pendingReturn.current = { pos, until: Date.now() + 15000 }), 400);
+      // Only when the user opted in; otherwise the machine stays put and a button is offered
+      if (machine.returnAfterStop) setTimeout(() => (pendingReturn.current = { pos, until: Date.now() + 15000 }), 400);
+      else setReturnOffer(pos);
     }
+    if (p?.state === 'running') setReturnOffer(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [g.progress?.state]);
+  useEffect(() => {
+    if (!g.connected) setReturnOffer(null);
+  }, [g.connected]);
+  /** Manual return after STOP: only when the controller has finished stopping and is Idle */
+  function returnToStart() {
+    const pos = returnOffer;
+    if (!pos) return;
+    const st = g.status.state.split(':')[0];
+    if (g.stopping || st !== 'Idle') return alert(st === 'Alarm' ? t('stop.locked') : t('stop.notIdle', { state: g.status.state }));
+    if (!confirm(t('stop.returnConfirm', { x: pos.x.toFixed(1), y: pos.y.toFixed(1) }))) return;
+    setReturnOffer(null);
+    g.push(t('stop.returning', { x: pos.x.toFixed(1), y: pos.y.toFixed(1) }));
+    g.send(['M5 S0', `G90 G0 X${pos.x.toFixed(3)} Y${pos.y.toFixed(3)}`]);
+  }
   useEffect(() => {
     const r = pendingReturn.current;
     if (!r) return;
@@ -284,7 +312,7 @@ export function App() {
     else if (st === 'Alarm') {
       pendingReturn.current = null;
       g.push(`⚠ ${t('stop.locked')}`);
-    } else if (st === 'Idle' && !g.jobActive) {
+    } else if (st === 'Idle' && !g.jobActive && !g.stopping) {
       pendingReturn.current = null;
       g.push(t('stop.returning', { x: r.pos.x.toFixed(1), y: r.pos.y.toFixed(1) }));
       g.send(['M5 S0', `G90 G0 X${r.pos.x.toFixed(3)} Y${r.pos.y.toFixed(3)}`]);
@@ -420,7 +448,14 @@ export function App() {
           copies: COPIES_1,
         };
       });
-      return { items: [...d.items, ...newItems], layers: [...d.layers, ...newLayers] };
+      // Engraving runs before cutting (a part cut free may shift): new fill layers go in front of
+      // the first cut/score layer, new cut/score layers at the end
+      const fills = newLayers.filter((l) => l.mode === 'fill');
+      const lines = newLayers.filter((l) => l.mode !== 'fill');
+      const firstLine = d.layers.findIndex((l) => l.mode === 'line');
+      const at = firstLine < 0 ? d.layers.length : firstLine;
+      const layers = [...d.layers.slice(0, at), ...fills, ...d.layers.slice(at), ...lines];
+      return { items: [...d.items, ...newItems], layers };
     });
     setSelectedIds(ids);
   }
@@ -486,8 +521,9 @@ export function App() {
     const vec = selectedIds.map((id) => items.find((i) => i.id === id)).filter((i): i is Item => !!i && i.kind === 'vector');
     if (vec.length < 2) return;
     const r = booleanPaths(op, vec.map(worldPaths));
-    if (r.openIgnored) g.push(t('bool.openIgnored', { n: r.openIgnored }));
     if (!r.paths.length) return alert(t('bool.empty'));
+    // Open lines have no area and would be lost with the originals: ask first
+    if (r.openIgnored && !confirm(t('bool.openConfirm', { n: r.openIgnored }))) return;
     const base = vec[0];
     const res = itemWithPaths({ ...base, id: uid(), name: t(`bool.name.${op}` as Key, { name: base.name }), override: undefined }, r.paths);
     const gone = new Set(vec.map((i) => i.id));
@@ -911,8 +947,18 @@ export function App() {
         {running && g.progress?.state !== 'paused' && <button onClick={() => window.laser.pause()}>⏸ {t('tb.pause')}</button>}
         {g.progress?.state === 'paused' && <button onClick={() => window.laser.resume()}>⏵ {t('tb.resume')}</button>}
         <button className="stop" onClick={() => window.laser.abort()} disabled={!g.connected}>
-          ■ {t('tb.stop')}
+          ■ {g.stopping ? t('tb.stopping') : t('tb.stop')}
         </button>
+        {returnOffer && !running && g.connected && (
+          <span className="return-offer">
+            <button onClick={returnToStart} disabled={g.stopping} title={t('stop.returnTip')}>
+              ⌂ {t('stop.returnBtn')}
+            </button>
+            <button className="tiny" onClick={() => setReturnOffer(null)} title={t('stop.dismiss')}>
+              ✕
+            </button>
+          </span>
+        )}
         <select className="lang" value={lang} title={t('lang.label')} onChange={(e) => setLang(e.target.value as Lang)}>
           {LANGS.map((l) => (
             <option key={l.id} value={l.id}>
@@ -951,7 +997,7 @@ export function App() {
         </div>
         <aside className="side">
           <ConnectionPanel g={g} machine={machine} setMachine={setMachine} locked={running} />
-          <JogPanel g={g} jog={jog} disabled={!g.connected || running} sMax={machine.sMax} firePower={machine.firePower ?? 3} />
+          <JogPanel g={g} jog={jog} disabled={!g.connected || running || g.stopping} sMax={machine.sMax} firePower={machine.firePower ?? 3} fireMaxS={machine.fireMaxS ?? 300} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
           {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} onEditText={editItem} onEditNodes={(it) => (setSelectedIds([it.id]), setTool('node'))} />}
           <LayersPanel

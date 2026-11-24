@@ -129,6 +129,8 @@ export interface MachineProfile {
   frameBeam?: boolean;
   /** Power of the positioning beam ("Fire"), % of S max */
   firePower?: number;
+  /** Fire switches itself off after this many seconds; 0 = never */
+  fireMaxS?: number;
 }
 
 export type OriginMode = 'absolute' | 'current';

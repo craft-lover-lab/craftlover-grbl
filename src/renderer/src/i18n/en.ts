@@ -291,8 +291,8 @@ export const en = {
   'prog.tip': 'Progress is estimated from the toolpath ({done}/{total} lines acknowledged)',
 
   // STOP behaviour, GRBL error help
-  'jobp.returnAfterStop': 'Return after STOP',
-  'jobp.returnAfterStopTip': 'After STOP, move the head back to where the job started (the work origin, or the start position when running from the current position)',
+  'jobp.returnAfterStop': 'Return automatically after STOP',
+  'jobp.returnAfterStopTip': 'Off (recommended): after STOP the head stays where it stopped and a "Return to start" button appears. On: the head moves back by itself once the machine is idle — only if you are sure nothing is in the way.',
   'stop.returning': 'Returning to the start position ({x}, {y})',
   'stop.locked': 'The machine is locked by an alarm after stopping — click "Unlock $X" (or Home), then ⌂ to go back to the origin',
   'grblerr.5': 'Homing is not enabled on this machine ($22=0). Use ⌂ to go to the work origin instead.',
@@ -402,7 +402,19 @@ export const en = {
   'bool.name.subtract': '{name} (subtracted)',
   'bool.name.intersect': '{name} (intersection)',
   'bool.empty': 'The result is empty — the shapes do not overlap.',
-  'bool.openIgnored': '{n} object(s) contain open lines; only closed shapes take part in weld/subtract/intersect',
+  'bool.openConfirm': '{n} of the selected objects contain open lines (no area). Weld/subtract/intersect only uses closed shapes, so those lines will be deleted together with the originals. Continue? (Undo with Ctrl+Z)',
+
+  // STOP lock, return after STOP, Fire maximum on-time
+  'err.stopping': 'The machine is still stopping — wait a moment until it has reset',
+  'tb.stopping': 'Stopping…',
+  'stop.returnBtn': 'Return to start',
+  'stop.returnTip': 'Move the head back to where the job started. Check the bed first: nothing in the way, the part has not shifted, no flame.',
+  'stop.returnConfirm': 'Move the laser head (laser off) back to ({x}, {y})?\n\nMake sure nothing is in the way.',
+  'stop.notIdle': 'The machine is not ready yet ({state}). Wait until it is Idle.',
+  'stop.dismiss': 'Hide (stay here)',
+  'jobp.fireMax': 'Fire auto-off (s)',
+  'jobp.fireMaxTip': 'The positioning beam switches itself off after this many seconds. 0 = never (not recommended).',
+  'jog.fireAutoOff': 'It switches off by itself in {s} s.',
 };
 
 export type Key = keyof typeof en;

@@ -121,3 +121,4 @@ button.firing { background: var(--stop); border-color: var(--stop); color: #fff;
 .air-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #343842; color: #9aa3b2; white-space: nowrap; }
 .air-badge.on { background: #1d5fa8; color: #fff; animation: air-pulse 1.6s ease-in-out infinite; }
 @keyframes air-pulse { 50% { background: #2f7cf6; } }
+.return-offer { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px dashed #f08a24; border-radius: 6px; }

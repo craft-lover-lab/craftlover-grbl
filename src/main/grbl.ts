@@ -43,6 +43,8 @@ export interface GrblEvents {
   onClose: () => void;
   /** The positioning beam ("Fire") was switched on or off */
   onFire?: (on: boolean) => void;
+  /** A STOP / safety stop is in progress: new commands are refused until it has finished */
+  onStopping?: (on: boolean) => void;
 }
 
 /** Byte stream to the controller (a serial port in the app, a mock in tests). */
@@ -68,6 +70,8 @@ export interface GrblOptions {
   manualDrainTimeoutMs?: number;
   /** How long to wait for a fresh status report (ms) */
   statusTimeoutMs?: number;
+  /** STOP: unlock commands after this long even if the controller never confirms the reset (ms) */
+  stoppingTimeoutMs?: number;
 }
 
 type Source = 'job' | 'manual' | 'sync';
@@ -105,6 +109,12 @@ export class GrblConnection {
   private beamOn = false;
   /** True while we are resetting the controller ourselves (STOP / safety stop) */
   private resetting = false;
+  /**
+   * STOP / safety stop in progress, from the feed hold until the controller has restarted and
+   * sent a status report again. All new commands are refused meanwhile, so nothing can slip in
+   * between the hold and the reset, or right after the restart.
+   */
+  private stopping: { afterReset: boolean; timer: ReturnType<typeof setTimeout> } | null = null;
   /** Last machine state from a status report, e.g. "Idle", "Run", "Hold:0", "Alarm" */
   machineState = '';
   /** True after a successful $H in this connection; cleared by alarm, reset or disconnect */
@@ -134,6 +144,10 @@ export class GrblConnection {
 
   get firing() {
     return this.beamOn;
+  }
+
+  get isStopping() {
+    return !!this.stopping;
   }
 
   async open(path: string, baud: number) {
@@ -167,6 +181,7 @@ export class GrblConnection {
     t?.close();
     this.endJob('aborted', 'disconnected');
     this.teardown();
+    this.endStopping();
   }
 
   /** Real-time commands (bypass the queue): '?', '!', '~', 0x18, 0x85 ... */
@@ -181,6 +196,7 @@ export class GrblConnection {
    */
   send(lines: string[]) {
     if (!this.t) throw new Error('NOT_CONNECTED');
+    if (this.stopping) throw new Error('STOPPING');
     if (this.jobActive) throw new Error('BUSY');
     for (const l of lines) {
       const s = l.trim();
@@ -195,11 +211,13 @@ export class GrblConnection {
    */
   async runJob(lines: string[]) {
     if (!this.t) throw new Error('NOT_CONNECTED');
+    if (this.stopping) throw new Error('STOPPING');
     if (this.jobActive) throw new Error('JOB_RUNNING');
     this.fireOff();
     await this.waitManualDrained();
     const state = await this.freshStatus();
     if (state.split(':')[0] !== 'Idle') throw new Error(`NOT_IDLE:${state}`);
+    if (this.stopping) throw new Error('STOPPING');
     if (this.jobActive) throw new Error('JOB_RUNNING');
     if (!this.t) throw new Error('NOT_CONNECTED');
     const clean = lines.map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
@@ -242,16 +260,32 @@ export class GrblConnection {
   /**
    * Positioning beam: constant low power (M3). It stays on until switched off — the UI warns
    * when it has been on for a while — but it is always switched off before a job, on STOP,
-   * reset, alarm and disconnect. Refused while a job is active.
+   * reset, alarm and disconnect. Refused while a job is active or a STOP is in progress.
+   * `maxMs` > 0 switches it off by itself after that long (enforced here, not in the UI).
    */
-  fire(sValue: number) {
+  fire(sValue: number, maxMs = 0) {
     this.send([`M3 S${Math.max(0, Math.round(sValue))}`, 'G1 F1000']);
     this.beamOn = true;
+    this.clearFireTimer();
+    if (maxMs > 0)
+      this.fireTimer = setTimeout(() => {
+        this.fireTimer = null;
+        if (!this.beamOn) return;
+        this.fireOff();
+        this.ev.onLine(`[FIRE] switched off after ${Math.round(maxMs / 1000)} s (maximum on-time)`);
+      }, maxMs);
     this.ev.onFire?.(true);
+  }
+
+  private fireTimer: ReturnType<typeof setTimeout> | null = null;
+  private clearFireTimer() {
+    if (this.fireTimer) clearTimeout(this.fireTimer);
+    this.fireTimer = null;
   }
 
   /** Switch the positioning beam off (no-op when it is not on). */
   fireOff() {
+    this.clearFireTimer();
     if (!this.beamOn) return;
     this.beamOn = false;
     if (this.t && !this.jobActive) {
@@ -334,6 +368,7 @@ export class GrblConnection {
     this.manualQueue = [];
     this.inFlight = [];
     this.cancelSafetyStop();
+    this.clearFireTimer();
     if (this.beamOn) {
       // A reset / STOP / disconnect turns the laser off; just report it
       this.beamOn = false;
@@ -372,6 +407,7 @@ export class GrblConnection {
    */
   private holdThenReset(timeoutMs: number) {
     this.realtime('!');
+    this.beginStopping();
     this.cancelSafetyStop();
     const epoch = this.epoch;
     this.safety = { epoch, timer: setTimeout(() => this.safetyReset(epoch), timeoutMs) };
@@ -387,6 +423,26 @@ export class GrblConnection {
     this.realtime(0x18);
   }
 
+  private beginStopping() {
+    if (this.stopping) clearTimeout(this.stopping.timer);
+    // Fallback for controllers that never send a banner after the reset: unlock eventually
+    const timer = setTimeout(() => {
+      if (!this.stopping) return;
+      this.ev.onLine('[STOP] the controller did not confirm the reset; check the machine before continuing');
+      this.endStopping();
+    }, this.opt.stoppingTimeoutMs ?? 6000);
+    const was = !!this.stopping;
+    this.stopping = { afterReset: false, timer };
+    if (!was) this.ev.onStopping?.(true);
+  }
+
+  private endStopping() {
+    if (!this.stopping) return;
+    clearTimeout(this.stopping.timer);
+    this.stopping = null;
+    this.ev.onStopping?.(false);
+  }
+
   private cancelSafetyStop() {
     if (this.safety) clearTimeout(this.safety.timer);
     this.safety = null;
@@ -400,6 +456,7 @@ export class GrblConnection {
     this.homed = false;
     this.endJob('aborted', 'disconnected');
     this.teardown();
+    this.endStopping();
     this.ev.onClose();
   }
 
@@ -481,11 +538,16 @@ export class GrblConnection {
       this.endJob('aborted', this.resetting ? 'stopped' : 'reset');
       this.resetting = false;
       this.machineState = '';
+      // The restart we asked for: unlock once the controller reports its state again
+      if (this.stopping) this.stopping.afterReset = true;
     }
     this.ev.onLine(line);
   }
 
   private onStatus(line: string) {
+    // Only a report that arrives after the restart confirms the STOP (this very report may
+    // still trigger the reset below)
+    const confirmsStop = !!this.stopping?.afterReset;
     this.machineState = line.replace(/^<|>$/g, '').split('|')[0];
     const state = this.machineState.split(':')[0];
     if (state === 'Alarm') {
@@ -501,6 +563,7 @@ export class GrblConnection {
     // Done only when the sync dwell was acknowledged and the machine reports Idle afterwards
     if (this.job.state === 'completing' && this.syncAcked && state === 'Idle') this.endJob('done');
     this.settle(this.statusWaiters, this.machineState);
+    if (confirmsStop) this.endStopping();
   }
 
   private startPolling() {

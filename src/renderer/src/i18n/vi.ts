@@ -276,8 +276,8 @@ export const vi: Record<Key, string> = {
   'prog.tip': 'Tiến độ được ước tính theo đường chạy ({done}/{total} dòng máy đã nhận)',
 
   // STOP behaviour, GRBL error help
-  'jobp.returnAfterStop': 'Về vị trí đầu sau khi DỪNG',
-  'jobp.returnAfterStopTip': 'Sau khi bấm DỪNG, đưa đầu laser về chỗ bắt đầu job (gốc làm việc, hoặc vị trí xuất phát khi chạy từ vị trí hiện tại)',
+  'jobp.returnAfterStop': 'Tự về sau khi DỪNG',
+  'jobp.returnAfterStopTip': 'Tắt (khuyên dùng): sau khi DỪNG, đầu laser đứng yên tại chỗ và hiện nút "Về vị trí bắt đầu". Bật: đầu laser tự chạy về khi máy rảnh — chỉ bật khi chắc chắn không có vật cản.',
   'stop.returning': 'Đang về vị trí bắt đầu ({x}, {y})',
   'stop.locked': 'Máy bị khóa do báo động sau khi dừng — bấm "Mở khóa $X" (hoặc Homing), rồi bấm ⌂ để về gốc',
   'grblerr.5': 'Máy này chưa bật Homing ($22=0). Hãy dùng nút ⌂ để về gốc làm việc.',
@@ -386,5 +386,17 @@ export const vi: Record<Key, string> = {
   'bool.name.subtract': '{name} (đã trừ)',
   'bool.name.intersect': '{name} (phần giao)',
   'bool.empty': 'Kết quả rỗng — các hình không chồng lên nhau.',
-  'bool.openIgnored': '{n} đối tượng có đường hở; chỉ hình kín mới tham gia gộp/trừ/giao',
+  'bool.openConfirm': '{n} đối tượng đang chọn có đường hở (không có diện tích). Gộp/trừ/giao chỉ dùng hình kín, nên các đường hở này sẽ bị xóa cùng hình gốc. Tiếp tục? (Hoàn tác bằng Ctrl+Z)',
+
+  // STOP lock, return after STOP, Fire maximum on-time
+  'err.stopping': 'Máy đang dừng — chờ một chút cho máy reset xong',
+  'tb.stopping': 'Đang dừng…',
+  'stop.returnBtn': 'Về vị trí bắt đầu',
+  'stop.returnTip': 'Đưa đầu laser về chỗ bắt đầu job. Kiểm tra bàn máy trước: không có vật cản, phôi không bị xê dịch, không có lửa.',
+  'stop.returnConfirm': 'Đưa đầu laser (tắt tia) về vị trí ({x}, {y})?\n\nHãy chắc chắn không có vật cản trên đường đi.',
+  'stop.notIdle': 'Máy chưa sẵn sàng ({state}). Chờ đến khi máy ở trạng thái Idle.',
+  'stop.dismiss': 'Ẩn (đứng yên tại chỗ)',
+  'jobp.fireMax': 'Fire tự tắt sau (giây)',
+  'jobp.fireMaxTip': 'Tia định vị tự tắt sau số giây này. 0 = không bao giờ (không khuyến khích).',
+  'jog.fireAutoOff': 'Tia sẽ tự tắt sau {s} giây.',
 };

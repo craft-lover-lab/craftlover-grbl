@@ -34,8 +34,11 @@ export class MockGrbl {
     return t;
   };
 
+  /** The controller stops answering (no ok, banner or status) — e.g. a hung board */
+  silent = false;
+
   private reply(l: string) {
-    if (!this.closed) this.on.line(l);
+    if (!this.closed && !this.silent) this.on.line(l);
   }
 
   private write(d: string | Uint8Array) {

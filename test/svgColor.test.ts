@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { cssColorToHex, paintOf } from '../src/renderer/src/io/svgColor';
+import { cssColorToHex, paintsOf } from '../src/renderer/src/io/svgColor';
 
-const style = (p: Partial<Parameters<typeof paintOf>[0]>) => ({ stroke: 'none', fill: 'rgb(0, 0, 0)', strokeWidth: '1px', strokeOpacity: '1', fillOpacity: '1', opacity: '1', ...p });
+const style = (p: Partial<Parameters<typeof paintsOf>[0]>) => ({ stroke: 'none', fill: 'rgb(0, 0, 0)', strokeWidth: '1px', strokeOpacity: '1', fillOpacity: '1', opacity: '1', ...p });
 
 describe('SVG colors', () => {
   it('normalizes computed colors to #rrggbb', () => {
@@ -18,15 +18,27 @@ describe('SVG colors', () => {
     expect(cssColorToHex('rgba(0, 0, 0, 0)')).toBeNull();
   });
 
-  it('uses the stroke color for stroked shapes (line) and the fill for fill-only shapes', () => {
-    expect(paintOf(style({ stroke: 'rgb(255, 0, 0)', fill: 'rgb(0, 0, 0)' }))).toEqual({ color: '#ff0000', mode: 'line' });
-    expect(paintOf(style({}))).toEqual({ color: '#000000', mode: 'fill' });
+  it('strokes become lines and fills become fill engraving', () => {
+    expect(paintsOf(style({ stroke: 'rgb(255, 0, 0)', fill: 'none' }))).toEqual([{ color: '#ff0000', mode: 'line' }]);
+    expect(paintsOf(style({}))).toEqual([{ color: '#000000', mode: 'fill' }]);
+  });
+
+  it('a red outline around a blue area gives two operations: cut the outline, engrave the area', () => {
+    expect(paintsOf(style({ stroke: 'rgb(255, 0, 0)', fill: 'rgb(0, 0, 255)' }))).toEqual([
+      { color: '#ff0000', mode: 'line' },
+      { color: '#0000ff', mode: 'fill' },
+    ]);
+  });
+
+  it('stroke and fill in the same color stay one line operation; <line> has no fill', () => {
+    expect(paintsOf(style({ stroke: 'rgb(0, 0, 0)', fill: 'rgb(0, 0, 0)' }))).toEqual([{ color: '#000000', mode: 'line' }]);
+    expect(paintsOf(style({ stroke: 'rgb(255, 0, 0)' }), false)).toEqual([{ color: '#ff0000', mode: 'line' }]);
   });
 
   it('ignores invisible shapes', () => {
-    expect(paintOf(style({ fill: 'none' }))).toBeNull();
-    expect(paintOf(style({ opacity: '0' }))).toBeNull();
-    expect(paintOf(style({ stroke: 'red', strokeWidth: '0px', fill: 'none' }))).toBeNull();
-    expect(paintOf(style({ fillOpacity: '0' }))).toBeNull();
+    expect(paintsOf(style({ fill: 'none' }))).toEqual([]);
+    expect(paintsOf(style({ opacity: '0' }))).toEqual([]);
+    expect(paintsOf(style({ stroke: 'red', strokeWidth: '0px', fill: 'none' }))).toEqual([]);
+    expect(paintsOf(style({ fillOpacity: '0' }))).toEqual([]);
   });
 });

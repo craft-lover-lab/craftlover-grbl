@@ -79,6 +79,7 @@ export function errorText(e: unknown): string {
   if (msg.includes('GS_NOT_FOUND')) return t('err.gsMissing');
   if (msg.includes('FONT_INVALID')) return t('err.fontInvalid');
   if (msg.includes('JOB_RUNNING')) return t('err.jobRunning');
+  if (msg.includes('STOPPING')) return t('err.stopping');
   if (msg.includes('LIBRARY_INVALID')) return t('err.libraryInvalid');
   // Strip Electron's "Error invoking remote method 'x': Error: " prefix
   return msg.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');

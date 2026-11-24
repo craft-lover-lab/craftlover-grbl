@@ -19,6 +19,7 @@ const grbl = new GrblConnection(
     onProgress: (p) => win?.webContents.send('grbl:progress', p),
     onClose: () => win?.webContents.send('grbl:closed'),
     onFire: (on) => win?.webContents.send('grbl:fire', { on }),
+    onStopping: (on) => win?.webContents.send('grbl:stopping', { on }),
   },
   { open: openSerial },
 );
@@ -95,7 +96,7 @@ ipcMain.handle('grbl:check', async () => {
   return { state: grbl.machineState, settings, jobActive: grbl.jobActive, homed: grbl.homed };
 });
 // Positioning beam (Fire): stays on until switched off; turned off before jobs, on STOP and disconnect
-ipcMain.handle('grbl:fire', (_e, on: boolean, s: number) => (on ? grbl.fire(s) : grbl.fireOff()));
+ipcMain.handle('grbl:fire', (_e, on: boolean, s: number, maxS = 0) => (on ? grbl.fire(s, maxS * 1000) : grbl.fireOff()));
 
 // Native dialog labels follow the language chosen in the UI
 const DIALOG_TEXT = {

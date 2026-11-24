@@ -2,7 +2,7 @@ import type { Polyline } from '../core/types';
 import { parsePathData } from './svgPath';
 import { pathsBounds, isEmpty } from '../core/geometry';
 import { t } from '../i18n';
-import { paintOf } from './svgColor';
+import { paintsOf } from './svgColor';
 
 const UNIT_MM: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: 25.4 / 96, '': 25.4 / 96 };
 
@@ -77,7 +77,7 @@ function elementMatrix(el: Element, root: Element): M {
 export interface SvgColorGroup {
   /** Original color, "#rrggbb" */
   color: string;
-  /** Stroked shapes → line (cut/score); fill-only shapes → fill engrave */
+  /** Strokes → line (cut/score); fills → fill engrave (a shape with both in different colors is in two groups) */
   mode: 'line' | 'fill';
   /** Paths relative to the group's own bottom-left corner (mm) */
   paths: Polyline[];
@@ -130,19 +130,22 @@ export function importSvg(text: string): { w: number; h: number; groups: SvgColo
       const cs = getComputedStyle(el);
       if (cs.display === 'none') return; // hides the whole subtree
       const d = shapeToD(el);
-      const paint = d && cs.visibility !== 'hidden' ? paintOf({ stroke: cs.stroke, fill: cs.fill, strokeWidth: cs.strokeWidth, strokeOpacity: cs.strokeOpacity, fillOpacity: cs.fillOpacity, opacity: cs.opacity }) : null;
-      if (d && paint) {
+      const style = { stroke: cs.stroke, fill: cs.fill, strokeWidth: cs.strokeWidth, strokeOpacity: cs.strokeOpacity, fillOpacity: cs.fillOpacity, opacity: cs.opacity };
+      const paints = d && cs.visibility !== 'hidden' ? paintsOf(style, tag !== 'line') : [];
+      if (d && paints.length) {
         const m = elementMatrix(el, svg);
-        const key = `${paint.color}|${paint.mode}`;
-        if (!byPaint.has(key)) byPaint.set(key, []);
-        const list = byPaint.get(key)!;
-        for (const pl of parsePathData(d, tolUnits))
-          list.push(
-            pl.map((p) => ({
-              x: (m[0] * p.x + m[2] * p.y + m[4] - vx) * sx,
-              y: -(m[1] * p.x + m[3] * p.y + m[5] - vy) * sy, // flip the Y axis
-            })),
-          );
+        const placed = parsePathData(d, tolUnits).map((pl) =>
+          pl.map((p) => ({
+            x: (m[0] * p.x + m[2] * p.y + m[4] - vx) * sx,
+            y: -(m[1] * p.x + m[3] * p.y + m[5] - vy) * sy, // flip the Y axis
+          })),
+        );
+        // Stroke and fill in different colors: the same outline goes to both groups
+        for (const paint of paints) {
+          const key = `${paint.color}|${paint.mode}`;
+          if (!byPaint.has(key)) byPaint.set(key, []);
+          byPaint.get(key)!.push(...placed);
+        }
       }
       for (const c of Array.from(el.children)) walk(c);
     };
