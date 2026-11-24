@@ -99,13 +99,13 @@ export const en = {
 
   // Jog panel
   'jog.title': 'Control & origin',
-  'jog.home': 'Go to work origin',
+  'jog.home': 'Go to the work origin (0, 0)',
   'jog.step': 'Step',
   'jog.speed': 'Jog speed',
   'jog.setOrigin': 'Set origin here',
   'jog.setOriginTip': 'Make the current laser position the (0,0) origin',
   'jog.homing': 'Home',
-  'jog.homingTip': 'Run the homing cycle (machines with limit switches)',
+  'jog.homingTip': 'Run the homing cycle $H — only for machines with limit switches ($22=1). To go to the work origin, use ⌂.',
   'jog.unlock': 'Unlock $X',
   'jog.unlockTip': 'Clear an alarm lock',
   'jog.fire': 'Fire {power}%',
@@ -264,9 +264,9 @@ export const en = {
 
   // Air assist and kerf
   'jobp.airAssist': 'Air assist (M8/M9)',
-  'jobp.airAssistTip': 'Tick only if your controller switches the air pump with M8/M9. If the firmware does not support M8, GRBL rejects it and the job stops at the first layer.',
+  'jobp.airAssistTip': 'Switch the air pump with M8/M9. Standard GRBL 1.1 accepts these commands even when no pump is wired; untick if your firmware rejects M8.',
   'lp.air': 'Air assist',
-  'lp.airOffTip': 'Not sent: "Air assist (M8/M9)" is off in the Job panel',
+  'lp.airOffTip': 'Not sent: "Air assist (M8/M9)" is turned off in the Job panel',
   'lp.kerf': 'Kerf (mm)',
   'lp.kerfTip': 'Beam width. Closed cut paths are offset by half of it: part outlines outwards, holes inwards, so parts come out at their real size. 0 = off.',
   'lp.kerfCalc': 'Work out the kerf from a test cut',
@@ -289,6 +289,16 @@ export const en = {
   'prog.elapsed': 'Elapsed {t}',
   'prog.remaining': '≈ {t} left',
   'prog.tip': 'Progress is estimated from the toolpath ({done}/{total} lines acknowledged)',
+
+  // STOP behaviour, GRBL error help
+  'jobp.returnAfterStop': 'Return after STOP',
+  'jobp.returnAfterStopTip': 'After STOP, move the head back to where the job started (the work origin, or the start position when running from the current position)',
+  'stop.returning': 'Returning to the start position ({x}, {y})',
+  'stop.locked': 'The machine is locked by an alarm after stopping — click "Unlock $X" (or Home), then ⌂ to go back to the origin',
+  'grblerr.5': 'Homing is not enabled on this machine ($22=0). Use ⌂ to go to the work origin instead.',
+  'grblerr.9': 'The machine is locked by an alarm. Click "Unlock $X" first.',
+  'grblerr.15': 'The jog would move past the machine travel (soft limits).',
+  'grblerr.20': 'The controller does not support this command.',
 
   // Layers order, material library, test grid
   'tb.library': 'Materials',

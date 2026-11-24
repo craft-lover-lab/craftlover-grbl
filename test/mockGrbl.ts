@@ -121,12 +121,15 @@ export class MockGrbl {
   /** Spontaneous controller restart (power glitch, watchdog …). */
   softReset() {
     this.resets++;
+    // Like real GRBL: resetting while the head is still moving loses position → ALARM:3 (locked)
+    const moving = this.state === 'Run' || this.state === 'Hold:1';
     this.rx = [];
     this.rxBytes = 0;
     this.planner = 0;
     this.partial = '';
-    if (this.state !== 'Alarm') this.state = 'Idle';
+    if (this.state !== 'Alarm') this.state = moving ? 'Alarm' : 'Idle';
     this.reply("Grbl 1.1h ['$' for help]");
+    if (moving) this.reply('ALARM:3');
   }
 
   disconnect() {

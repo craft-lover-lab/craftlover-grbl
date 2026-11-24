@@ -91,13 +91,13 @@ export const vi: Record<Key, string> = {
   'log.disconnected': '— Đã ngắt kết nối —',
 
   'jog.title': 'Điều khiển & gốc tọa độ',
-  'jog.home': 'Về gốc làm việc',
+  'jog.home': 'Về gốc làm việc (0, 0)',
   'jog.step': 'Bước',
   'jog.speed': 'Tốc độ jog',
   'jog.setOrigin': 'Đặt gốc tại đây',
   'jog.setOriginTip': 'Lấy vị trí hiện tại của đầu laser làm gốc (0,0)',
   'jog.homing': 'Homing',
-  'jog.homingTip': 'Chạy về công tắc hành trình (nếu máy có lắp)',
+  'jog.homingTip': 'Chạy chu trình Homing $H — chỉ dùng cho máy có công tắc hành trình ($22=1). Muốn về gốc làm việc, hãy dùng nút ⌂.',
   'jog.unlock': 'Mở khóa $X',
   'jog.unlockTip': 'Mở khóa sau báo động',
   'jog.fire': 'Bắn tia {power}%',
@@ -249,9 +249,9 @@ export const vi: Record<Key, string> = {
 
   // Air assist and kerf
   'jobp.airAssist': 'Thổi khí (M8/M9)',
-  'jobp.airAssistTip': 'Chỉ tích nếu bo điều khiển bật/tắt bơm khí bằng lệnh M8/M9. Nếu firmware không hỗ trợ M8, GRBL sẽ báo lỗi và job dừng ngay ở lớp đầu tiên.',
+  'jobp.airAssistTip': 'Bật/tắt bơm khí bằng lệnh M8/M9. GRBL 1.1 bản chuẩn đều nhận lệnh này kể cả khi không nối bơm; bỏ tích nếu firmware báo lỗi với M8.',
   'lp.air': 'Thổi khí',
-  'lp.airOffTip': 'Chưa gửi lệnh: "Thổi khí (M8/M9)" trong bảng Công việc đang tắt',
+  'lp.airOffTip': 'Chưa gửi lệnh: "Thổi khí (M8/M9)" trong bảng Công việc đang bị tắt',
   'lp.kerf': 'Kerf (mm)',
   'lp.kerfTip': 'Độ rộng vết cắt. Đường cắt kín được bù một nửa giá trị này: viền chi tiết nới ra ngoài, lỗ thu vào trong, để chi tiết đúng kích thước. 0 = tắt.',
   'lp.kerfCalc': 'Tính kerf từ một lần cắt thử',
@@ -274,6 +274,16 @@ export const vi: Record<Key, string> = {
   'prog.elapsed': 'Đã chạy {t}',
   'prog.remaining': 'còn ≈ {t}',
   'prog.tip': 'Tiến độ được ước tính theo đường chạy ({done}/{total} dòng máy đã nhận)',
+
+  // STOP behaviour, GRBL error help
+  'jobp.returnAfterStop': 'Về vị trí đầu sau khi DỪNG',
+  'jobp.returnAfterStopTip': 'Sau khi bấm DỪNG, đưa đầu laser về chỗ bắt đầu job (gốc làm việc, hoặc vị trí xuất phát khi chạy từ vị trí hiện tại)',
+  'stop.returning': 'Đang về vị trí bắt đầu ({x}, {y})',
+  'stop.locked': 'Máy bị khóa do báo động sau khi dừng — bấm "Mở khóa $X" (hoặc Homing), rồi bấm ⌂ để về gốc',
+  'grblerr.5': 'Máy này chưa bật Homing ($22=0). Hãy dùng nút ⌂ để về gốc làm việc.',
+  'grblerr.9': 'Máy đang bị khóa do báo động. Hãy bấm "Mở khóa $X" trước.',
+  'grblerr.15': 'Lệnh jog sẽ chạy quá hành trình của máy (soft limit).',
+  'grblerr.20': 'Bo điều khiển không hỗ trợ lệnh này.',
 
   // Layers order, material library, test grid
   'tb.library': 'Vật liệu',

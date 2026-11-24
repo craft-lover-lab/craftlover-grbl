@@ -171,13 +171,39 @@ describe('errors and interruptions', () => {
     expect(() => conn.send(['G0 X0'])).toThrow('NOT_CONNECTED');
   });
 
-  it('STOP soft-resets immediately and reports a user stop (not a crash)', async () => {
+  it('STOP holds first and resets only once the head has stopped — no alarm, position kept', async () => {
     await conn.runJob(job(100));
-    mock.step(5);
+    mock.step(5); // moving
     conn.abort();
     expect(last()).toMatchObject({ state: 'aborted', reason: 'stopped' });
-    expect(log.some((l) => l.startsWith('Grbl'))).toBe(true); // the mock reset itself
+    expect(mock.state).toBe('Hold:1'); // decelerating, not reset yet
+    expect(mock.resets).toBe(0);
+    mock.holdComplete();
+    mock.reportStatus(); // Hold:0 → reset now
+    expect(mock.resets).toBe(1);
+    expect(mock.state).toBe('Idle'); // not locked by ALARM:3
+    expect(log.some((l) => l.startsWith('ALARM'))).toBe(false);
     expect(mock.rx).toHaveLength(0);
+    expect(() => conn.send(['G90 G0 X0 Y0'])).not.toThrow(); // can return to the origin
+  });
+
+  it('STOP resets at once when the machine is already idle', async () => {
+    conn.abort();
+    expect(mock.resets).toBe(1); // the status asked for right after the hold says Idle
+  });
+
+  it('STOP falls back to a reset when the hold never completes', async () => {
+    vi.useFakeTimers();
+    try {
+      await conn.runJob(job(100));
+      mock.step(5);
+      conn.abort();
+      expect(mock.resets).toBe(0);
+      vi.advanceTimersByTime(1600);
+      expect(mock.resets).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('pause sends a feed hold and resume continues to completion', async () => {
@@ -287,7 +313,10 @@ describe('review round 2', () => {
 
   it('STOP and a controller reset also end the beam', async () => {
     conn.fire(30);
+    mock.step();
     conn.abort();
+    mock.holdComplete();
+    mock.reportStatus();
     expect(conn.firing).toBe(false);
   });
 

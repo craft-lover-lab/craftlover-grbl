@@ -62,6 +62,8 @@ export interface GrblOptions {
   stopOnError?: boolean;
   /** How long to wait for a feed hold to settle before the safety reset (ms) */
   holdTimeoutMs?: number;
+  /** STOP: how long to wait for the feed hold to stop the head before resetting anyway (ms) */
+  stopHoldTimeoutMs?: number;
   /** How long runJob() waits for earlier manual commands to finish (ms) */
   manualDrainTimeoutMs?: number;
   /** How long to wait for a fresh status report (ms) */
@@ -223,14 +225,18 @@ export class GrblConnection {
   }
 
   /**
-   * STOP button: immediate soft reset (Ctrl-X). GRBL stops motion and turns the laser off.
-   * This is a software stop — it does not replace a physical emergency switch.
+   * STOP button: feed hold, then a soft reset (Ctrl-X) once the head has stopped — the machine
+   * keeps its position and is not locked by an alarm. This is a software stop — it does not
+   * replace a physical emergency switch.
    */
   abort() {
-    this.teardown();
-    this.resetting = true;
-    this.realtime(0x18);
+    this.jobQueue = [];
+    this.manualQueue = [];
     this.endJob('aborted', 'stopped');
+    // Feed hold first: the head decelerates without losing steps (GRBL turns the laser off in a
+    // hold), then the reset flushes the buffer. Resetting while still moving would trigger
+    // ALARM:3 and lock the machine until $X / homing.
+    this.holdThenReset(this.opt.stopHoldTimeoutMs ?? 1500);
   }
 
   /**
@@ -357,10 +363,19 @@ export class GrblConnection {
     this.jobQueue = [];
     this.manualQueue = [];
     this.endJob('failed', 'error', detail);
+    this.holdThenReset(this.opt.holdTimeoutMs ?? 3000);
+  }
+
+  /**
+   * Feed hold, then one soft reset as soon as the machine has stopped (Hold:0, or Idle when it
+   * was not moving at all) — or after `timeoutMs` at the latest.
+   */
+  private holdThenReset(timeoutMs: number) {
     this.realtime('!');
     this.cancelSafetyStop();
     const epoch = this.epoch;
-    this.safety = { epoch, timer: setTimeout(() => this.safetyReset(epoch), this.opt.holdTimeoutMs ?? 3000) };
+    this.safety = { epoch, timer: setTimeout(() => this.safetyReset(epoch), timeoutMs) };
+    this.realtime('?'); // ask for a status now instead of waiting for the next poll
   }
 
   private safetyReset(epoch: number) {
@@ -481,7 +496,8 @@ export class GrblConnection {
       }
     }
     // Hold:0 = hold complete (the head has stopped) → safe to reset after a G-code error
-    if (this.machineState === 'Hold:0' && this.safety) this.safetyReset(this.safety.epoch);
+    // Stopped after the feed hold (or was not moving at all) → safe to reset now
+    if (this.safety && (this.machineState === 'Hold:0' || state === 'Idle')) this.safetyReset(this.safety.epoch);
     // Done only when the sync dwell was acknowledged and the machine reports Idle afterwards
     if (this.job.state === 'completing' && this.syncAcked && state === 'Idle') this.endJob('done');
     this.settle(this.statusWaiters, this.machineState);

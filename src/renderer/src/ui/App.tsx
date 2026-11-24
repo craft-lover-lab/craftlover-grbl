@@ -36,14 +36,19 @@ const DEFAULT_MACHINE: MachineProfile = {
   frameBeam: true,
   // Positioning beam ("Fire"): bright enough to see on a 10 W diode, far below marking power
   firePower: 3,
+  // Air assist via M8/M9 (standard GRBL 1.1 accepts it even when no pump is wired)
+  airAssist: true,
+  returnAfterStop: true,
   travelSpeed: 6000,
 };
 
 /** Saved machine profile, upgraded to the current fields. */
 function initialMachine(): MachineProfile {
-  const m = load('machine', DEFAULT_MACHINE);
+  let m = load('machine', DEFAULT_MACHINE);
   // v0.1 framed with the laser off (0 %) and had no toggle: switch to the visible beam once
-  if (m.frameBeam === undefined) return { ...m, frameBeam: true, framePower: m.framePower > 0 ? m.framePower : 1 };
+  if (m.frameBeam === undefined) m = { ...m, frameBeam: true, framePower: m.framePower > 0 ? m.framePower : 1 };
+  // Air assist used to be an opt-in machine option; it is on by default now
+  if (m.airAssist === undefined) m = { ...m, airAssist: true };
   return m;
 }
 
@@ -65,7 +70,7 @@ const baseLayer = { minPower: 0, passes: 1, lineInterval: 0.1, dither: 'floyd' a
 const defaultLayers = (): Layer[] => [
   { ...baseLayer, id: 'image', name: t('layer.image'), color: '#333333', mode: 'image', speed: 3000, power: 50 },
   { ...baseLayer, id: 'fill', name: t('layer.fill'), color: '#18a058', mode: 'fill', speed: 6000, power: 40 },
-  { ...baseLayer, id: 'score', name: t('layer.score'), color: '#2f7cf6', mode: 'line', speed: 3000, power: 30 },
+  { ...baseLayer, id: 'score', name: t('layer.score'), color: '#2f7cf6', mode: 'line', speed: 3000, power: 30, air: true },
   { ...baseLayer, id: 'cut', name: t('layer.cut'), color: '#e5243b', mode: 'line', speed: 300, power: 100, air: true },
 ];
 
@@ -74,7 +79,8 @@ function initialLayers(): Layer[] {
   try {
     const v = localStorage.getItem('layers');
     if (!v) return defaultLayers();
-    const ls: Layer[] = JSON.parse(v);
+    // Line (cut/score) layers saved before air assist existed get it switched on
+    const ls: Layer[] = (JSON.parse(v) as Layer[]).map((l) => (l.air === undefined ? { ...l, air: l.mode === 'line' } : l));
     return localStorage.getItem('layerOrder') === '2' ? ls : migrateLegacyOrder(ls);
   } catch {
     return defaultLayers();
@@ -181,7 +187,7 @@ export function App() {
   const freeColor = (ls: Layer[] = layers) => PALETTE.find((c) => !ls.some((l) => l.color.toLowerCase() === c)) ?? PALETTE[ls.length % PALETTE.length];
 
   function addLayer() {
-    const l: Layer = { ...baseLayer, id: uid(), name: t('layer.new', { n: layers.length + 1 }), color: freeColor(), mode: 'line', speed: 1000, power: 20 };
+    const l: Layer = { ...baseLayer, id: uid(), name: t('layer.new', { n: layers.length + 1 }), color: freeColor(), mode: 'line', speed: 1000, power: 20, air: true };
     setLayers((a) => [...a, l]);
   }
 
@@ -253,6 +259,34 @@ export function App() {
   const jobOpt: JobOptions = { originMode, anchor, currentPos: g.status.wpos };
   // A job is running, paused or finishing: manual control and new jobs are locked
   const running = g.jobActive;
+
+  // ---------- After STOP: go back to where the job started ----------
+  const jobStart = useRef<Pt>({ x: 0, y: 0 });
+  const pendingReturn = useRef<{ pos: Pt; until: number } | null>(null);
+  useEffect(() => {
+    const p = g.progress;
+    if (p?.state === 'aborted' && p.reason === 'stopped' && machine.returnAfterStop) {
+      // Armed shortly after STOP so the Idle that counts is the one after the hold + reset
+      const pos = jobStart.current;
+      setTimeout(() => (pendingReturn.current = { pos, until: Date.now() + 15000 }), 400);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [g.progress?.state]);
+  useEffect(() => {
+    const r = pendingReturn.current;
+    if (!r) return;
+    const st = g.status.state.split(':')[0];
+    if (Date.now() > r.until) pendingReturn.current = null;
+    else if (st === 'Alarm') {
+      pendingReturn.current = null;
+      g.push(`⚠ ${t('stop.locked')}`);
+    } else if (st === 'Idle' && !g.jobActive) {
+      pendingReturn.current = null;
+      g.push(t('stop.returning', { x: r.pos.x.toFixed(1), y: r.pos.y.toFixed(1) }));
+      g.send(['M5 S0', `G90 G0 X${r.pos.x.toFixed(3)} Y${r.pos.y.toFixed(3)}`]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [g.status]);
 
   // ---------- Progress: time-weighted, with elapsed and remaining time ----------
   const [plan, setPlan] = useState<{ cum: number[]; total: number } | null>(null);
@@ -359,6 +393,7 @@ export function App() {
           // Low, safe defaults: the user sets real values (or loads a preset) before running
           speed: mode === 'fill' ? 6000 : 1000,
           power: 20,
+          air: mode === 'line',
         };
         newLayers.push(l);
         return l.id;
@@ -413,7 +448,7 @@ export function App() {
   function pickColor(color: string) {
     let layer = layers.find((l) => l.color.toLowerCase() === color);
     if (!layer) {
-      layer = { ...baseLayer, id: uid(), name: t('layer.new', { n: layers.length + 1 }), color, mode: 'line', speed: 1000, power: 20 };
+      layer = { ...baseLayer, id: uid(), name: t('layer.new', { n: layers.length + 1 }), color, mode: 'line', speed: 1000, power: 20, air: true };
       const nl = layer;
       setLayers((a) => [...a, nl]);
     }
@@ -744,6 +779,7 @@ export function App() {
       }
       if (!confirm(t('job.confirmStart', { n: j.lines.length, time: fmtTime(j.seconds) }) + note)) return;
       setPlan(progressPlan(j.lines, machine.travelSpeed));
+      jobStart.current = originMode === 'current' ? { ...g.status.wpos } : { x: 0, y: 0 };
       jobClock.current = { start: Date.now(), pausedAt: 0, pausedTotal: 0, end: 0 };
       await window.laser.run(j.lines);
     } catch (e) {

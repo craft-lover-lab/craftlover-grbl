@@ -76,7 +76,7 @@ export async function buildTestGrid(
   const speeds = steps(o.speedMin, o.speedMax, Math.max(1, o.cols), 10);
   const powers = steps(o.powerMin, o.powerMax, Math.max(1, o.rows), 1);
   const base = { minPower: 0, lineInterval: 0.1, dither: 'floyd' as const, threshold: 128, overscan: 2.5, bidirectional: true, enabled: true };
-  const cellLayer: Layer = { ...base, id: uid(), name: names.cells, color: colors.cells, mode: o.mode, speed: speeds[0], power: powers[0], passes: o.passes };
+  const cellLayer: Layer = { ...base, id: uid(), name: names.cells, color: colors.cells, mode: o.mode, speed: speeds[0], power: powers[0], passes: o.passes, air: o.mode === 'line' };
   const labelLayer: Layer = { ...base, id: uid(), name: names.labels, color: colors.labels, mode: 'line', speed: o.labelSpeed, power: o.labelPower, passes: 1 };
 
   const labelSize = Math.min(4, Math.max(2, o.cell * 0.3));

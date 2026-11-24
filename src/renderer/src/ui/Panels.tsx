@@ -206,6 +206,8 @@ export function JobPanel(p: {
         <input type="number" value={m.sMax} onChange={(e) => p.setMachine({ ...m, sMax: +e.target.value })} />
         <label>{t('jobp.firePower')}</label>
         <input type="number" step={1} min={1} max={10} value={m.firePower ?? 3} onChange={(e) => p.setMachine({ ...m, firePower: Math.min(10, Math.max(1, +e.target.value || 1)) })} />
+        <label title={t('jobp.returnAfterStopTip')}>{t('jobp.returnAfterStop')}</label>
+        <input type="checkbox" checked={m.returnAfterStop !== false} title={t('jobp.returnAfterStopTip')} onChange={(e) => p.setMachine({ ...m, returnAfterStop: e.target.checked })} />
         <label title={t('jobp.airAssistTip')}>{t('jobp.airAssist')}</label>
         <input type="checkbox" checked={!!m.airAssist} title={t('jobp.airAssistTip')} onChange={(e) => p.setMachine({ ...m, airAssist: e.target.checked })} />
       </div>
@@ -383,7 +385,8 @@ export function LayersPanel(p: {
               <label>{t('lp.name')}</label>
               <input value={l.name} onChange={(e) => patch(l.id, { name: e.target.value })} />
               <label>{t('lp.mode')}</label>
-              <select value={l.mode} onChange={(e) => patch(l.id, { mode: e.target.value as Layer['mode'] })}>
+              {/* Cut/score layers get air assist by default; engraving layers don't */}
+              <select value={l.mode} onChange={(e) => patch(l.id, { mode: e.target.value as Layer['mode'], air: e.target.value === 'line' })}>
                 <option value="line">{t('mode.line')}</option>
                 <option value="fill">{t('mode.fill')}</option>
                 <option value="image">{t('mode.image')}</option>

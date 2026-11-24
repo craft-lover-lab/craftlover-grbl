@@ -70,8 +70,9 @@ declare global {
   }
 }
 
-/** GRBL alarm codes that get a human-readable explanation in the console. */
+/** GRBL alarm and error codes that get a human-readable explanation in the console. */
 const ALARMS = new Set(['1', '2', '3', '8', '9']);
+const ERRORS = new Set(['5', '9', '15', '20']);
 
 export function useGrbl() {
   const [connected, setConnected] = useState(false);
@@ -92,7 +93,10 @@ export function useGrbl() {
       }
       if (/^Grbl|^GrblHAL/i.test(line)) setVersion(line);
       const am = line.match(/^ALARM:(\d+)/);
-      push(am && ALARMS.has(am[1]) ? `${line}  ← ${t(`alarm.${am[1]}` as Key)}` : line);
+      const em = line.match(/^error:(\d+)/);
+      if (am && ALARMS.has(am[1])) push(`${line}  ← ${t(`alarm.${am[1]}` as Key)}`);
+      else if (em && ERRORS.has(em[1])) push(`${line}  ⓘ ${t(`grblerr.${em[1]}` as Key)}`);
+      else push(line);
     });
     let last: JobState | null = null;
     const off2 = window.laser.onProgress((p) => {
