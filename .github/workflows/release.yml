@@ -1,0 +1,39 @@
+name: Release
+
+# Push a version tag (e.g. v0.2.0) to build the Windows installer and publish a GitHub Release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # Builds the app and the NSIS installer in release/ (serialport is rebuilt for Electron)
+      - run: npm run dist
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/*.exe \
+            --title "CraftLover GRBL ${GITHUB_REF_NAME#v}" \
+            --generate-notes
+      - name: Keep the installer as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: release/*.exe

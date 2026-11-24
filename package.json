@@ -17,14 +17,10 @@
     "start": "npm run build && electron .",
     "dev": "npm run build:main && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dist": "npm run build && electron-builder --win --publish never"
   },
   "dependencies": {
-    "clipper-lib": "^6.4.2",
-    "opentype.js": "^2.0.0",
-    "pdfjs-dist": "^6.5.438",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
     "serialport": "^13.0.0"
   },
   "devDependencies": {
@@ -34,13 +30,56 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
+    "clipper-lib": "^6.4.2",
     "concurrently": "^10.0.7",
     "cross-env": "^10.1.0",
     "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
+    "opentype.js": "^2.0.0",
+    "pdfjs-dist": "^6.5.438",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.1",
     "wait-on": "^9.5.1"
+  },
+  "productName": "CraftLover GRBL",
+  "author": "CraftLover Lab",
+  "homepage": "https://github.com/craft-lover-lab/craftlover-grbl",
+  "build": {
+    "appId": "com.craftloverlab.grbl",
+    "productName": "CraftLover GRBL",
+    "copyright": "MIT License",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "CraftLover-GRBL-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "CraftLover GRBL"
+    },
+    "publish": null,
+    "npmRebuild": false
   }
 }

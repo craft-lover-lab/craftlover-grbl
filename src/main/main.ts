@@ -9,6 +9,9 @@ let win: BrowserWindow | null = null;
 
 // LASER_PROFILE=<folder>: run with a separate settings profile (clean first-run state for tests/screenshots)
 if (process.env.LASER_PROFILE) app.setPath('userData', path.resolve(process.env.LASER_PROFILE));
+// Keep settings, the material library and autosave in the same folder for the installed app
+// and development builds (Electron would otherwise name it after productName)
+else app.setPath('userData', path.join(app.getPath('appData'), 'craftlover-grbl'));
 
 const grbl = new GrblConnection(
   {
