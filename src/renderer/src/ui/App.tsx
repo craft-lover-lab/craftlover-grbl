@@ -22,6 +22,7 @@ import { itemWithPaths, worldPaths } from '../core/nodes';
 import { groupItems, ungroupItem } from '../core/group';
 import { builtinPresets, normalizePresets, presetFromLayer, presetToLayer } from '../core/materials';
 import { buildTestGrid, type TestGridOptions } from '../core/testGrid';
+import { cleanScanOffsets } from '../core/scanOffset';
 import { PALETTE, Palette, PropertyBar, ToolBar, type PropertyActions } from './DesignBars';
 import { clampFireMax } from './Panels';
 import { AirBadge, ConnectionPanel, ItemPanel, JobPanel, JogPanel, LayersPanel } from './Panels';
@@ -245,9 +246,10 @@ export function App() {
       {
         cells: t('test.cellsLayer'),
         labels: t('test.labelsLayer'),
-        cell: (sp, pw) => t('test.cellName', { speed: sp, power: pw }),
+        cell: (sp, pw) => (o.mode === 'scan' ? t('test.scanCellName', { speed: sp, offset: pw.toFixed(2) }) : t('test.cellName', { speed: sp, power: pw })),
         speedAxis: t('test.speedAxis'),
         powerAxis: t('test.powerAxis'),
+        offsetAxis: t('test.offsetAxis'),
       },
       { cells: cellsColor, labels: labelsColor },
       async (s, size) => (font ? textToPaths(s, font.file, size, 'left').catch(() => null) : null),
@@ -257,6 +259,12 @@ export function App() {
     setSelectedIds(r.items.map((i) => i.id));
     setTestOpen(false);
     g.push(t('test.created', { cols: r.speeds.length, rows: r.powers.length }));
+  }
+  /** From a scan-offset test cell: remember this offset for this speed (replaces the same speed) */
+  function saveScanOffset(speed: number, offset: number) {
+    if (!(speed > 0)) return;
+    setMachine((m) => ({ ...m, scanOffsets: cleanScanOffsets([...(m.scanOffsets ?? []).filter((r) => r.speed !== speed), { speed, offset }]) }));
+    g.push(t('scan.saved', { speed, offset: offset.toFixed(2) }));
   }
   const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
 
@@ -1020,7 +1028,7 @@ export function App() {
           <ConnectionPanel g={g} machine={machine} setMachine={setMachine} locked={running} />
           <JogPanel g={g} jog={jog} disabled={!g.connected || running || g.stopping} sMax={machine.sMax} firePower={machine.firePower ?? 3} fireMaxS={clampFireMax(machine.fireMaxS ?? 60)} />
           <JobPanel originMode={originMode} setOriginMode={setOriginMode} anchor={anchor} setAnchor={setAnchor} machine={machine} setMachine={setMachine} />
-          {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} onEditText={editItem} onEditNodes={(it) => (setSelectedIds([it.id]), setTool('node'))} />}
+          {selected && <ItemPanel item={selected} layers={layers} patch={(p) => patchItem(selected.id, p)} onTrace={traceSelected} onSavePreset={savePresetFromItem} onEditText={editItem} onEditNodes={(it) => (setSelectedIds([it.id]), setTool('node'))} onSaveScanOffset={saveScanOffset} />}
           <LayersPanel
             layers={layers}
             counts={layerCounts}

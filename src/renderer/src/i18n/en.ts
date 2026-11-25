@@ -424,6 +424,23 @@ export const en = {
   'group.ungrouped': 'Ungrouped into {n} objects',
   'group.nothingToUngroup': 'Nothing to ungroup: the selected object is a single shape',
   'group.manyParts': 'This makes {n} separate objects, which can slow the editor down. Continue?',
+  'lp.bidirTip': 'Engrave going both left and right (about twice as fast). If edges look soft or doubled, measure the scan offset (Material test → Scan offset).',
+  'lp.outline': 'Trace outline after fill',
+  'lp.outlineTip': 'After engraving the inside, trace the edges of every shape once at the same speed/power, so the edges come out crisp like the design.',
+  'scan.title': 'Scan offset (bidirectional)',
+  'scan.tip': 'When engraving both ways, the burn lags behind the head, so lines going left and right do not line up and edges look soft. Enter the offset measured with the Scan offset test for a few speeds; speeds in between are interpolated.',
+  'scan.empty': 'Not measured (0). Run Material test → Scan offset, select the sharpest cell of each speed and click "Use this offset".',
+  'scan.add': 'Add a speed',
+  'scan.remove': 'Remove',
+  'scan.offset': 'Offset (mm)',
+  'scan.cellHint': 'Test cell: {speed} mm/min with offset {offset} mm. If its bar edges are the sharpest of its column, use it.',
+  'scan.useCell': 'Use this offset for this speed',
+  'scan.saved': 'Scan offset {offset} mm saved for {speed} mm/min (Job panel → Scan offset)',
+  'test.modeScan': 'Scan offset (bidirectional)',
+  'test.offset': 'Offset (mm)',
+  'test.offsetAxis': 'Offset (mm) ↑',
+  'test.scanCellName': 'Scan {speed} mm/min · {offset} mm',
+  'test.scanHowto': 'Each cell is a set of vertical bars engraved both ways. Look with a magnifier: in each speed column pick the cell whose bar edges are straight and sharp, select it and click "Use this offset for this speed".',
 };
 
 export type Key = keyof typeof en;

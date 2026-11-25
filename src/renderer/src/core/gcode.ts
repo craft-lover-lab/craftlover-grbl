@@ -2,6 +2,7 @@ import type { Bounds, Item, JobOptions, Layer, MachineProfile, Polyline, Pt } fr
 import { anchorPoint, copyOffsets, isEmpty, itemsBounds, optimizeOrder, placedPaths } from './geometry';
 import { rasterize, type Raster } from './raster';
 import { kerfOffset } from './kerf';
+import { scanOffsetFor } from './scanOffset';
 
 const f = (n: number) => {
   const s = n.toFixed(3);
@@ -102,38 +103,52 @@ export function generateJob(
     for (let pass = 0; pass < Math.max(1, layer.passes); pass++) {
       if (layer.passes > 1) out.push(`; Pass ${pass + 1}/${layer.passes}`);
       if (layer.mode === 'line') {
-        const all: Polyline[] = [];
-        for (const it of its)
-          for (const o of copyOffsets(it))
-            // Kerf: grow part outlines / shrink holes by half the beam width (per object, so
-            // holes are recognised inside their own part)
-            for (const pl of kerfOffset(placedPaths(it, { x: o.x + off.x, y: o.y + off.y }), layer.kerf ?? 0)) all.push(pl);
-        const s = S(layer, 1);
-        let first = true;
-        for (const pl of optimizeOrder(all, pos)) {
-          g0(pl[0]);
-          let line = `G1 X${f(pl[1].x)} Y${f(pl[1].y)} S${s}`;
-          if (first) line += ` F${layer.speed}`;
-          first = false;
-          out.push(line);
-          for (let k = 2; k < pl.length; k++) out.push(`G1 X${f(pl[k].x)} Y${f(pl[k].y)}`);
-          for (let k = 1; k < pl.length; k++) seconds += (Math.hypot(pl[k].x - pl[k - 1].x, pl[k].y - pl[k - 1].y) / layer.speed) * 60;
-          cut.push(pl);
-          pos = pl[pl.length - 1];
-        }
+        traceGcode(its, layer, layer.kerf ?? 0);
       } else {
         for (const it of its) {
           const r = raster(it, layer);
           for (const o of copyOffsets(it)) rasterGcode(r, { x: o.x + off.x, y: o.y + off.y }, layer);
+        }
+        // Fill + outline: one more trace along the edges (same speed/power) makes them crisp
+        if (layer.mode === 'fill' && layer.outline) {
+          out.push('; Outline');
+          traceGcode(its.filter((i) => i.kind === 'vector'), layer, 0);
         }
       }
     }
     out.push('M5 S0');
   }
 
+  /** Follow the vector paths of the objects (cut / score / outline). */
+  function traceGcode(its: Item[], layer: Layer, kerf: number) {
+    const all: Polyline[] = [];
+    for (const it of its)
+      for (const o of copyOffsets(it))
+        // Kerf: grow part outlines / shrink holes by half the beam width (per object, so
+        // holes are recognised inside their own part)
+        for (const pl of kerfOffset(placedPaths(it, { x: o.x + off.x, y: o.y + off.y }), kerf)) all.push(pl);
+    const s = S(layer, 1);
+    let first = true;
+    for (const pl of optimizeOrder(all, pos)) {
+      if (pl.length < 2) continue;
+      g0(pl[0]);
+      let line = `G1 X${f(pl[1].x)} Y${f(pl[1].y)} S${s}`;
+      if (first) line += ` F${layer.speed}`;
+      first = false;
+      out.push(line);
+      for (let k = 2; k < pl.length; k++) out.push(`G1 X${f(pl[k].x)} Y${f(pl[k].y)}`);
+      for (let k = 1; k < pl.length; k++) seconds += (Math.hypot(pl[k].x - pl[k - 1].x, pl[k].y - pl[k - 1].y) / layer.speed) * 60;
+      cut.push(pl);
+      pos = pl[pl.length - 1];
+    }
+  }
+
   function rasterGcode(r: Raster, o: Pt, layer: Layer) {
     let dirLTR = true;
     let firstF = true;
+    // Bidirectional: the burn lags behind the head, so lines going right land a bit right and
+    // lines going left a bit left. Shift every line back by the measured offset to line them up.
+    const shift = layer.bidirectional ? (layer.scanOffset ?? scanOffsetFor(m, layer.speed)) : 0;
     for (let row = r.rows - 1; row >= 0; row--) {
       // The bottom image row maps to the smallest Y
       const y = o.y + (r.rows - 1 - row + 0.5) * r.py;
@@ -146,9 +161,11 @@ export function generateJob(
           b = c;
         }
       if (a < 0) continue; // blank row → skip
-      const xL = o.x + a * r.px;
-      const xR = o.x + (b + 1) * r.px;
       const ltr = layer.bidirectional ? dirLTR : true;
+      const sh = ltr ? -shift : shift;
+      const ox = o.x + sh;
+      const xL = ox + a * r.px;
+      const xR = ox + (b + 1) * r.px;
       // Overscan is shortened at the bed edges so the head never travels past X = 0 / X = bed width
       const ovL = Math.max(0, Math.min(layer.overscan, xL));
       const ovR = Math.max(0, Math.min(layer.overscan, m.bedW - xR));
@@ -160,7 +177,7 @@ export function generateJob(
       let runEnd = 0;
       for (const c of order) {
         const s = S(layer, r.data[base + c]);
-        const edge = ltr ? o.x + (c + 1) * r.px : o.x + c * r.px;
+        const edge = ltr ? ox + (c + 1) * r.px : ox + c * r.px;
         if (s !== curS && curS >= 0) out.push(`G1 X${f(runEnd)} S${curS}`);
         curS = s;
         runEnd = edge;
@@ -168,7 +185,7 @@ export function generateJob(
       out.push(`G1 X${f(runEnd)} S${curS}`);
       const endX = ltr ? xR + ovR : xL - ovL;
       out.push(`G1 X${f(endX)} S0`);
-      cut.push([{ x: xL, y }, { x: xR, y }]);
+      cut.push([{ x: xL - sh, y }, { x: xR - sh, y }]);
       seconds += ((xR - xL + ovL + ovR) / layer.speed) * 60;
       pos = { x: endX, y };
       dirLTR = !dirLTR;

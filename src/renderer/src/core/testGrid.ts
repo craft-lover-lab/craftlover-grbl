@@ -3,8 +3,8 @@ import { uid } from './geometry';
 import { rectPath } from './shapes';
 
 export interface TestGridOptions {
-  /** Cells are outlines (line) or filled squares (fill) */
-  mode: Extract<LayerMode, 'line' | 'fill'>;
+  /** Cells are outlines (line), filled squares (fill), or scan-offset bars (scan: rows = offset) */
+  mode: Extract<LayerMode, 'line' | 'fill'> | 'scan';
   speedMin: number;
   speedMax: number;
   /** Number of speed steps (columns) */
@@ -17,6 +17,10 @@ export interface TestGridOptions {
   cell: number;
   gap: number;
   passes: number;
+  /** Scan-offset test: offsets tried (rows) and the power used for every cell */
+  offsetMin?: number;
+  offsetMax?: number;
+  scanPower?: number;
   /** Engrave the speed/power values next to the grid */
   labels: boolean;
   labelSpeed: number;
@@ -42,7 +46,31 @@ export const DEFAULT_TEST: TestGridOptions = {
   labelPower: 20,
   x: 10,
   y: 10,
+  offsetMin: 0,
+  offsetMax: 0.25,
+  scanPower: 40,
 };
+
+/** Values tried per row: power (%) for a material test, scan offset (mm) for a scan test. */
+export function rowValues(o: TestGridOptions): number[] {
+  if (o.mode === 'scan') return steps(o.offsetMin ?? 0, o.offsetMax ?? 0.25, Math.max(1, o.rows), 0.01).map((v) => +v.toFixed(3));
+  return steps(o.powerMin, o.powerMax, Math.max(1, o.rows), 1);
+}
+
+/** Vertical bars filling a w×h cell: their left/right edges show how well scan lines line up. */
+export function barPaths(w: number, h: number, bars = 4): Polyline[] {
+  const bw = w / (bars * 2 - 1);
+  return Array.from({ length: bars }, (_, k) => {
+    const x0 = k * 2 * bw;
+    return [
+      { x: x0, y: 0 },
+      { x: x0 + bw, y: 0 },
+      { x: x0 + bw, y: h },
+      { x: x0, y: h },
+      { x: x0, y: 0 },
+    ];
+  });
+}
 
 /** Evenly spaced, rounded values from min to max. */
 export function steps(min: number, max: number, n: number, round: number): number[] {
@@ -69,14 +97,15 @@ const COPIES_1 = { cols: 1, rows: 1, gapX: 5, gapY: 5 };
  */
 export async function buildTestGrid(
   o: TestGridOptions,
-  names: { cells: string; labels: string; cell: (s: number, p: number) => string; speedAxis: string; powerAxis: string },
+  names: { cells: string; labels: string; cell: (s: number, p: number) => string; speedAxis: string; powerAxis: string; offsetAxis?: string },
   colors: { cells: string; labels: string },
   text: TextFn,
 ): Promise<TestGridResult> {
   const speeds = steps(o.speedMin, o.speedMax, Math.max(1, o.cols), 10);
-  const powers = steps(o.powerMin, o.powerMax, Math.max(1, o.rows), 1);
+  const scan = o.mode === 'scan';
+  const powers = rowValues(o);
   const base = { minPower: 0, lineInterval: 0.1, dither: 'floyd' as const, threshold: 128, overscan: 2.5, bidirectional: true, enabled: true };
-  const cellLayer: Layer = { ...base, id: uid(), name: names.cells, color: colors.cells, mode: o.mode, speed: speeds[0], power: powers[0], passes: o.passes, air: o.mode === 'line' };
+  const cellLayer: Layer = { ...base, id: uid(), name: names.cells, color: colors.cells, mode: o.mode === 'scan' ? 'fill' : o.mode, speed: speeds[0], power: scan ? (o.scanPower ?? 40) : powers[0], passes: o.passes, air: o.mode === 'line' };
   const labelLayer: Layer = { ...base, id: uid(), name: names.labels, color: colors.labels, mode: 'line', speed: o.labelSpeed, power: o.labelPower, passes: 1 };
 
   const labelSize = Math.min(4, Math.max(2, o.cell * 0.3));
@@ -91,8 +120,8 @@ export async function buildTestGrid(
         id: uid(),
         name: names.cell(sp, pw),
         kind: 'vector',
-        shape: { type: 'rect', radius: 0 },
-        paths: [rectPath(o.cell, o.cell)],
+        ...(scan ? {} : { shape: { type: 'rect' as const, radius: 0 } }),
+        paths: scan ? barPaths(o.cell, o.cell) : [rectPath(o.cell, o.cell)],
         srcW: o.cell,
         srcH: o.cell,
         w: o.cell,
@@ -101,7 +130,7 @@ export async function buildTestGrid(
         y: o.y + r * pitch,
         layerId: cellLayer.id,
         copies: COPIES_1,
-        override: { speed: sp, power: pw, passes: o.passes },
+        override: scan ? { speed: sp, power: o.scanPower ?? 40, passes: o.passes, scanOffset: pw } : { speed: sp, power: pw, passes: o.passes },
       }),
     ),
   );
@@ -119,10 +148,10 @@ export async function buildTestGrid(
       await addText(String(sp), labelSize, (w) => ({ x: o.x + left + c * pitch + (o.cell - w) / 2, y: top + labelSize * 0.6 }));
     // Power values left of each row, right-aligned against the grid
     for (const [r, pw] of powers.entries())
-      await addText(`${pw}%`, labelSize, (w, h) => ({ x: o.x + left - w - labelSize * 0.6, y: o.y + r * pitch + (o.cell - h) / 2 }));
+      await addText(scan ? pw.toFixed(2) : `${pw}%`, labelSize, (w, h) => ({ x: o.x + left - w - labelSize * 0.6, y: o.y + r * pitch + (o.cell - h) / 2 }));
     // Axis titles
     await addText(names.speedAxis, labelSize, () => ({ x: o.x + left, y: top + labelSize * 2.4 }));
-    await addText(names.powerAxis, labelSize, (w) => ({ x: o.x + left - w - labelSize * 0.6, y: top + labelSize * 0.6 }));
+    await addText(scan ? (names.offsetAxis ?? 'Offset') : names.powerAxis, labelSize, (w) => ({ x: o.x + left - w - labelSize * 0.6, y: top + labelSize * 0.6 }));
   }
   return { layers: [cellLayer, labelLayer], items, speeds, powers };
 }

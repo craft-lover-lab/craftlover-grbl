@@ -244,7 +244,36 @@ export function JobPanel(p: {
         <label title={t('jobp.airAssistTip')}>{t('jobp.airAssist')}</label>
         <input type="checkbox" checked={!!m.airAssist} title={t('jobp.airAssistTip')} onChange={(e) => p.setMachine({ ...m, airAssist: e.target.checked })} />
       </div>
+      <ScanOffsetTable machine={m} setMachine={p.setMachine} />
     </section>
+  );
+}
+
+/** Measured scan offset per speed (bidirectional engraving); used between the rows by interpolation. */
+function ScanOffsetTable({ machine: m, setMachine }: { machine: MachineProfile; setMachine: (m: MachineProfile) => void }) {
+  const rows = m.scanOffsets ?? [];
+  const save = (r: { speed: number; offset: number }[]) => setMachine({ ...m, scanOffsets: r });
+  return (
+    <div className="scan-offsets">
+      <div className="row">
+        <b title={t('scan.tip')}>{t('scan.title')}</b>
+        <button className="tiny" title={t('scan.add')} onClick={() => save([...rows, { speed: rows.length ? rows[rows.length - 1].speed + 1000 : 3000, offset: 0 }])}>
+          +
+        </button>
+      </div>
+      {rows.length === 0 && <div className="muted">{t('scan.empty')}</div>}
+      {rows.map((r, i) => (
+        <div className="row" key={i}>
+          <NumField value={r.speed} min={1} step={500} title={t('lp.speed')} onCommit={(v) => save(rows.map((x, k) => (k === i ? { ...x, speed: Math.max(1, Math.round(v)) } : x)))} />
+          <span className="muted">mm/min →</span>
+          <NumField value={r.offset} min={-1} step={0.01} title={t('scan.offset')} onCommit={(v) => save(rows.map((x, k) => (k === i ? { ...x, offset: Math.max(-1, Math.min(1, v)) } : x)))} />
+          <span className="muted">mm</span>
+          <button className="tiny" title={t('scan.remove')} onClick={() => save(rows.filter((_, k) => k !== i))}>
+            ✕
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -257,6 +286,7 @@ export function ItemPanel({
   onSavePreset,
   onEditText,
   onEditNodes,
+  onSaveScanOffset,
 }: {
   item: Item;
   layers: Layer[];
@@ -265,6 +295,8 @@ export function ItemPanel({
   onSavePreset: (it: Item) => void;
   onEditText: (it: Item) => void;
   onEditNodes: (it: Item) => void;
+  /** Scan-offset test cell: store its offset for its speed in the machine table */
+  onSaveScanOffset: (speed: number, offset: number) => void;
 }) {
   const [th, setTh] = useState(128);
   const [smooth, setSmooth] = useState(0.8);
@@ -333,7 +365,16 @@ export function ItemPanel({
           <button onClick={() => onTrace({ threshold: th, minArea: 0.5, smooth })}>✎ {t('item.trace')}</button>
         </>
       )}
-      {item.override && (
+      {item.override?.scanOffset !== undefined && (
+        <>
+          <h4>{t('scan.title')}</h4>
+          <div className="muted">{t('scan.cellHint', { speed: item.override.speed ?? 0, offset: item.override.scanOffset.toFixed(2) })}</div>
+          <button className="go use-scan" onClick={() => onSaveScanOffset(item.override!.speed ?? 0, item.override!.scanOffset!)}>
+            ⤴ {t('scan.useCell')}
+          </button>
+        </>
+      )}
+      {item.override && item.override.scanOffset === undefined && (
         <>
           <h4>{t('item.override')}</h4>
           <div className="muted">{t('item.overrideHint')}</div>
@@ -502,8 +543,14 @@ export function LayersPanel(p: {
                   <input type="number" step={0.01} min={0.03} value={l.lineInterval} onChange={(e) => patch(l.id, { lineInterval: Math.max(0.03, +e.target.value) })} />
                   <label>{t('lp.overscan')}</label>
                   <input type="number" step={0.5} min={0} value={l.overscan} onChange={(e) => patch(l.id, { overscan: Math.max(0, +e.target.value) })} />
-                  <label>{t('lp.bidir')}</label>
-                  <input type="checkbox" checked={l.bidirectional} onChange={(e) => patch(l.id, { bidirectional: e.target.checked })} />
+                  <label title={t('lp.bidirTip')}>{t('lp.bidir')}</label>
+                  <input type="checkbox" checked={l.bidirectional} title={t('lp.bidirTip')} onChange={(e) => patch(l.id, { bidirectional: e.target.checked })} />
+                </>
+              )}
+              {l.mode === 'fill' && (
+                <>
+                  <label title={t('lp.outlineTip')}>{t('lp.outline')}</label>
+                  <input type="checkbox" checked={!!l.outline} title={t('lp.outlineTip')} onChange={(e) => patch(l.id, { outline: e.target.checked })} />
                 </>
               )}
               {l.mode === 'image' && (

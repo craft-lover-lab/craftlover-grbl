@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DEFAULT_TEST, steps, type TestGridOptions } from '../core/testGrid';
+import { DEFAULT_TEST, rowValues, steps, type TestGridOptions } from '../core/testGrid';
 import { t } from '../i18n';
 import { NumField } from './DesignBars';
 
@@ -17,7 +17,8 @@ export function TestGridDialog({ onClose, onCreate }: { onClose: () => void; onC
   const w = o.cols * (o.cell + o.gap) - o.gap;
   const h = o.rows * (o.cell + o.gap) - o.gap;
   const speeds = steps(o.speedMin, o.speedMax, o.cols, 10);
-  const powers = steps(o.powerMin, o.powerMax, o.rows, 1);
+  const scan = o.mode === 'scan';
+  const rows = rowValues(o);
 
   return (
     <div className="modal-bg" onMouseDown={onClose}>
@@ -28,6 +29,7 @@ export function TestGridDialog({ onClose, onCreate }: { onClose: () => void; onC
           <select value={o.mode} onChange={(e) => set({ mode: e.target.value as TestGridOptions['mode'] })}>
             <option value="fill">{t('test.modeFill')}</option>
             <option value="line">{t('test.modeLine')}</option>
+            <option value="scan">{t('test.modeScan')}</option>
           </select>
         </div>
         <div className="grid-test">
@@ -39,9 +41,19 @@ export function TestGridDialog({ onClose, onCreate }: { onClose: () => void; onC
           <NumField value={o.speedMin} min={1} step={100} onCommit={(v) => set({ speedMin: v })} />
           <NumField value={o.speedMax} min={1} step={100} onCommit={(v) => set({ speedMax: v })} />
           <NumField value={o.cols} min={1} step={1} onCommit={(v) => set({ cols: Math.min(20, Math.max(1, Math.round(v))) })} />
-          <label>{t('lp.power')}</label>
-          <NumField value={o.powerMin} min={0} step={5} onCommit={(v) => set({ powerMin: Math.min(100, v) })} />
-          <NumField value={o.powerMax} min={0} step={5} onCommit={(v) => set({ powerMax: Math.min(100, v) })} />
+          {scan ? (
+            <>
+              <label>{t('test.offset')}</label>
+              <NumField value={o.offsetMin ?? 0} min={-1} step={0.05} onCommit={(v) => set({ offsetMin: Math.max(-1, Math.min(1, v)) })} />
+              <NumField value={o.offsetMax ?? 0.25} min={-1} step={0.05} onCommit={(v) => set({ offsetMax: Math.max(-1, Math.min(1, v)) })} />
+            </>
+          ) : (
+            <>
+              <label>{t('lp.power')}</label>
+              <NumField value={o.powerMin} min={0} step={5} onCommit={(v) => set({ powerMin: Math.min(100, v) })} />
+              <NumField value={o.powerMax} min={0} step={5} onCommit={(v) => set({ powerMax: Math.min(100, v) })} />
+            </>
+          )}
           <NumField value={o.rows} min={1} step={1} onCommit={(v) => set({ rows: Math.min(20, Math.max(1, Math.round(v))) })} />
         </div>
         <div className="grid4">
@@ -49,6 +61,12 @@ export function TestGridDialog({ onClose, onCreate }: { onClose: () => void; onC
           <NumField value={o.cell} min={2} step={1} onCommit={(v) => set({ cell: v })} />
           <label>{t('test.gap')}</label>
           <NumField value={o.gap} min={0} step={1} onCommit={(v) => set({ gap: v })} />
+          {scan && (
+            <>
+              <label>{t('lp.power')}</label>
+              <NumField value={o.scanPower ?? 40} min={1} step={5} onCommit={(v) => set({ scanPower: Math.min(100, Math.max(1, v)) })} />
+            </>
+          )}
           <label>{t('lp.passes')}</label>
           <NumField value={o.passes} min={1} step={1} onCommit={(v) => set({ passes: Math.max(1, Math.round(v)) })} />
           <label>X / Y</label>
@@ -72,9 +90,9 @@ export function TestGridDialog({ onClose, onCreate }: { onClose: () => void; onC
           <br />
           {t('lp.speed')}: {speeds.join(' · ')}
           <br />
-          {t('lp.power')}: {powers.map((p) => `${p}%`).join(' · ')}
+          {scan ? `${t('test.offset')}: ${rows.map((v) => v.toFixed(2)).join(' · ')}` : `${t('lp.power')}: ${rows.map((p) => `${p}%`).join(' · ')}`}
         </div>
-        <div className="muted">{t('test.howto')}</div>
+        <div className="muted">{t(scan ? 'test.scanHowto' : 'test.howto')}</div>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button onClick={onClose}>{t('common.cancel')}</button>
           <button

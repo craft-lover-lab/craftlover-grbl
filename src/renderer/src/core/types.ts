@@ -37,6 +37,10 @@ export interface Layer {
   air?: boolean;
   /** Beam width to compensate on closed cut paths (mm); 0 = off. Line mode only */
   kerf?: number;
+  /** Fill mode: trace the outlines once more after engraving, for crisp edges */
+  outline?: boolean;
+  /** Scan offset (mm) forced for this layer instead of the machine table (scan-offset test cells) */
+  scanOffset?: number;
 }
 
 export interface Bitmap {
@@ -103,6 +107,7 @@ export interface LayerOverride {
   speed?: number;
   power?: number;
   passes?: number;
+  scanOffset?: number;
 }
 
 export interface MachineProfile {
@@ -129,6 +134,11 @@ export interface MachineProfile {
   firePower?: number;
   /** Fire switches itself off after this many seconds (FIRE_MAX_RANGE) */
   fireMaxS?: number;
+  /**
+   * Bidirectional engraving: measured scan offset per speed (mm). Each scan line is shifted back
+   * by this much in its own direction, so lines going left and right line up again.
+   */
+  scanOffsets?: { speed: number; offset: number }[];
 }
 
 export type OriginMode = 'absolute' | 'current';
@@ -172,5 +182,6 @@ export interface MaterialPreset {
   bidirectional: boolean;
   air?: boolean;
   kerf?: number;
+  outline?: boolean;
   notes: string;
 }
